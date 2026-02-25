@@ -1,0 +1,21 @@
+{
+  "name": "skillgraph-api",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "gray-matter": "^4.0.3",
+    "@hono/node-server": "^1.8.0",
+    "glob": "^10.3.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0",
+    "@types/node": "^20.0.0"
+  }
+}
