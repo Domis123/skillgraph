@@ -46,10 +46,32 @@ export interface SearchResult {
 
 async function apiFetch<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    next: { revalidate: 30 }, // Cache for 30s
+    next: { revalidate: 30 }, // Cache for 30s on server
   });
   if (!res.ok) throw new Error(`API error: ${res.status} ${res.statusText}`);
   return res.json();
+}
+
+// No-cache version for client-side refreshes
+async function apiFetchFresh<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+export async function getGraphFresh(): Promise<GraphData> {
+  return apiFetchFresh<GraphData>('/v1/graph');
+}
+
+export async function getStatsFresh(): Promise<{
+  totalNodes: number;
+  totalEdges: number;
+  types: Record<string, number>;
+  domains: Record<string, number>;
+}> {
+  return apiFetchFresh('/v1/graph/stats');
 }
 
 export async function getGraph(): Promise<GraphData> {

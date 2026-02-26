@@ -837,8 +837,25 @@ interface DashboardProps {
   };
 }
 
-export function Dashboard({ graphData, stats }: DashboardProps) {
-  const { nodes, edges } = graphData;
+export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
+  // Live data state — starts with server-rendered data, can be refreshed
+  const [liveGraph, setLiveGraph] = useState(graphData);
+  const [liveStats, setLiveStats] = useState(initialStats);
+  const { nodes, edges } = liveGraph;
+
+  // Refresh function — fetches fresh data from API bypassing cache
+  const refreshData = useCallback(async () => {
+    try {
+      const [g, s] = await Promise.all([
+        fetch(`${API_BASE}/v1/graph`, { cache: 'no-store' }).then(r => r.json()),
+        fetch(`${API_BASE}/v1/graph/stats`, { cache: 'no-store' }).then(r => r.json()),
+      ]);
+      setLiveGraph(g);
+      setLiveStats(s);
+    } catch (e) {
+      console.error('Refresh failed:', e);
+    }
+  }, []);
 
   const [selId, setSelId] = useState<string | null>(null);
   const [hovId, setHovId] = useState<string | null>(null);
@@ -1016,8 +1033,8 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
             display: 'inline-block', width: 8, height: 8,
             background: A, animation: 'blink 2s steps(1) infinite',
           }} />
-          <span style={{ fontSize: 10, color: DM }}>N:{stats.totalNodes}</span>
-          <span style={{ fontSize: 10, color: DM }}>E:{stats.totalEdges}</span>
+          <span style={{ fontSize: 10, color: DM }}>N:{liveStats.totalNodes}</span>
+          <span style={{ fontSize: 10, color: DM }}>E:{liveStats.totalEdges}</span>
         </div>
 
         {/* Persistent search bar */}
@@ -1156,8 +1173,8 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
             </div>
           ))}
           <div style={{ padding: '14px', borderTop: `1px solid ${GR}`, fontSize: 9, color: DM, lineHeight: 2 }}>
-            <div>NODES: {stats.totalNodes} ACTIVE</div>
-            <div>EDGES: {stats.totalEdges}</div>
+            <div>NODES: {liveStats.totalNodes} ACTIVE</div>
+            <div>EDGES: {liveStats.totalEdges}</div>
             <div>DOMAINS: {Object.keys(domains).length}</div>
           </div>
         </div>
@@ -1280,9 +1297,8 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
                   });
                   const d = await res.json().catch(() => ({}));
                   if (res.ok) {
-                    alert('Archived successfully');
                     setSelId(null);
-                    window.location.reload();
+                    await refreshData();
                   } else {
                     alert(`Archive failed: ${d.error || res.status}`);
                   }
@@ -1359,10 +1375,10 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
       {ingestOpen && (
         <IngestModal
           onClose={() => setIngestOpen(false)}
-          onCreated={(id) => {
+          onCreated={async (id) => {
             setIngestOpen(false);
-            // Reload page to show new node
-            window.location.reload();
+            await refreshData();
+            setSelId(id);
           }}
         />
       )}
