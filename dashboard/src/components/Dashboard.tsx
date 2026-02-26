@@ -230,7 +230,7 @@ function MNode({
 
 // ── Inspector ──
 function Inspector({
-  node, detail, loading, onClose, onNav, onArchive,
+  node, detail, loading, onClose, onNav, onArchive, onExport,
 }: {
   node: NodeMeta | null;
   detail: NodeFull | null;
@@ -238,6 +238,7 @@ function Inspector({
   onClose: () => void;
   onNav: (id: string) => void;
   onArchive: (id: string) => void;
+  onExport: (id: string) => void;
 }) {
   if (!node) return (
     <div style={{ color: DM, fontSize: 11 }}>
@@ -247,12 +248,15 @@ function Inspector({
         lineHeight: 1.8, whiteSpace: 'pre', fontSize: 11,
       }}>
 {`+──────────────────────────────────+
-│  SELECT A NODE TO INSPECT        │
+│  KEYBOARD SHORTCUTS              │
 │                                  │
 │  [CMD+K]  Search graph           │
-│  [ESC]    Deselect node          │
-│  [CLICK]  Inspect node           │
-│  [HOVER]  Preview connections    │
+│  [N]      New node               │
+│  [TAB]    Cycle nodes            │
+│  [←/→]   Walk connections        │
+│  [E]      Export subgraph        │
+│  [ESC]    Deselect / close       │
+│  [?]      Toggle this help       │
 +──────────────────────────────────+`}
       </pre>
       <div style={{ marginTop: 20, borderTop: `1px solid ${GR}`, paddingTop: 12 }}>
@@ -366,6 +370,19 @@ function Inspector({
           }}
         >
           CP_URL
+        </a>
+        <a
+          href="#"
+          onClick={(e) => { e.preventDefault(); onExport(node.id); }}
+          style={{
+            padding: '9px 8px', border: `3px solid ${BR}`,
+            background: 'transparent', color: DM, fontSize: 10, fontWeight: 700,
+            fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.04em',
+            textAlign: 'center', textDecoration: 'none', display: 'block',
+            cursor: 'pointer',
+          }}
+        >
+          EXP
         </a>
         <a
           href="#"
@@ -870,6 +887,50 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
   const [ingestOpen, setIngestOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [changelogData, setChangelogData] = useState<any[]>([]);
+  const [showHelp, setShowHelp] = useState(false);
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(true);
+
+  // Export subgraph: selected node + connected nodes as JSON
+  const exportSubgraph = useCallback(async (nodeId: string) => {
+    const center = nodes.find(n => n.id === nodeId);
+    if (!center) return;
+    const connIds = new Set<string>([nodeId]);
+    edges.forEach(e => {
+      if (e.source === nodeId) connIds.add(e.target);
+      if (e.target === nodeId) connIds.add(e.source);
+    });
+    const subNodes = nodes.filter(n => connIds.has(n.id));
+    const subEdges = edges.filter(e => connIds.has(e.source) && connIds.has(e.target));
+
+    // Fetch raw markdown for each node
+    const rawNodes = await Promise.all(
+      subNodes.map(async n => {
+        try {
+          const res = await fetch(`${API_BASE}/v1/nodes/${n.id}/raw`);
+          return { id: n.id, markdown: await res.text() };
+        } catch {
+          return { id: n.id, markdown: '(fetch failed)' };
+        }
+      })
+    );
+
+    const exportData = {
+      exported: new Date().toISOString(),
+      center: nodeId,
+      nodes: subNodes,
+      edges: subEdges,
+      markdownFiles: rawNodes,
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `skillgraph-${nodeId}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [nodes, edges]);
 
   const selNode = useMemo(() => nodes.find((n) => n.id === selId) || null, [nodes, selId]);
   const hovNode = useMemo(() => nodes.find((n) => n.id === hovId) || null, [nodes, hovId]);
@@ -992,13 +1053,56 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
       }
       if (e.key === 'Escape') {
         if (ingestOpen) setIngestOpen(false);
-        else if (searchOpen) setSearchOpen(false);
+        else if (searchOpen) { setSearchOpen(false); setSearchQuery(''); }
         else setSelId(null);
+      }
+      // Tab: cycle through nodes
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const ids = nodes.map(n => n.id);
+        if (ids.length === 0) return;
+        if (!selId) { setSelId(ids[0]); return; }
+        const cur = ids.indexOf(selId);
+        const next = e.shiftKey
+          ? (cur - 1 + ids.length) % ids.length
+          : (cur + 1) % ids.length;
+        setSelId(ids[next]);
+      }
+      // Arrow keys: navigate connections when a node is selected
+      if (selId && (e.key === 'ArrowRight' || e.key === 'ArrowDown')) {
+        e.preventDefault();
+        const conns = edges
+          .filter(ed => ed.source === selId || ed.target === selId)
+          .map(ed => ed.source === selId ? ed.target : ed.source);
+        if (conns.length > 0) {
+          const curIdx = conns.indexOf(selId);
+          setSelId(conns[(curIdx + 1) % conns.length]);
+        }
+      }
+      if (selId && (e.key === 'ArrowLeft' || e.key === 'ArrowUp')) {
+        e.preventDefault();
+        const conns = edges
+          .filter(ed => ed.source === selId || ed.target === selId)
+          .map(ed => ed.source === selId ? ed.target : ed.source);
+        if (conns.length > 0) {
+          const curIdx = conns.indexOf(selId);
+          setSelId(conns[(curIdx - 1 + conns.length) % conns.length]);
+        }
+      }
+      // E: export selected node subgraph
+      if ((e.key === 'e' || e.key === 'E') && selId) {
+        e.preventDefault();
+        exportSubgraph(selId);
+      }
+      // ?: show help
+      if (e.key === '?') {
+        e.preventDefault();
+        setShowHelp(prev => !prev);
       }
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [searchOpen, ingestOpen]);
+  }, [searchOpen, ingestOpen, selId, nodes, edges]);
 
   // Fetch changelog when opened
   useEffect(() => {
@@ -1109,11 +1213,20 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
 
       {/* ── 3-COLUMN LAYOUT ── */}
       <div style={{
-        display: 'grid', gridTemplateColumns: '240px 1fr 320px',
+        display: 'grid',
+        gridTemplateColumns: `${leftOpen ? '240px' : '0px'} 1fr ${rightOpen ? '320px' : '0px'}`,
         height: 'calc(100vh - 48px)',
+        transition: 'grid-template-columns 0.2s ease',
       }}>
         {/* LEFT: Domain tree */}
-        <div style={{ borderRight: `3px solid ${BR}`, overflowY: 'auto', position: 'relative', zIndex: 100 }}>
+        <div style={{
+          borderRight: leftOpen ? `3px solid ${BR}` : 'none',
+          overflowY: 'auto', overflowX: 'hidden',
+          position: 'relative', zIndex: 100,
+          width: leftOpen ? 240 : 0,
+          opacity: leftOpen ? 1 : 0,
+          transition: 'opacity 0.2s ease',
+        }}>
           <div style={{
             padding: '10px 14px', borderBottom: `3px solid ${BR}`,
             fontSize: 10, color: DM, fontWeight: 700, letterSpacing: '0.1em',
@@ -1267,10 +1380,71 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
               {Math.round(zoom * 100)}%
             </div>
           </div>
+          {/* Sidebar toggles */}
+          <div style={{
+            position: 'absolute', bottom: 16, left: 16, display: 'flex',
+            gap: 4, zIndex: 10,
+          }}>
+            <button
+              onClick={() => setLeftOpen(p => !p)}
+              style={{
+                width: 32, height: 32, border: `2px solid ${leftOpen ? A : BR}`, background: BG,
+                color: leftOpen ? A : DM, fontSize: 10, cursor: 'pointer',
+                fontFamily: "'JetBrains Mono', monospace", display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >{leftOpen ? '◀' : '▶'}</button>
+            <button
+              onClick={() => setRightOpen(p => !p)}
+              style={{
+                width: 32, height: 32, border: `2px solid ${rightOpen ? A : BR}`, background: BG,
+                color: rightOpen ? A : DM, fontSize: 10, cursor: 'pointer',
+                fontFamily: "'JetBrains Mono', monospace", display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >{rightOpen ? '▶' : '◀'}</button>
+            <button
+              onClick={() => setShowHelp(p => !p)}
+              style={{
+                width: 32, height: 32, border: `2px solid ${BR}`, background: BG,
+                color: DM, fontSize: 14, cursor: 'pointer',
+                fontFamily: "'JetBrains Mono', monospace", display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >?</button>
+          </div>
+          {/* Help overlay */}
+          {showHelp && (
+            <div style={{
+              position: 'absolute', top: 20, left: '50%', transform: 'translateX(-50%)',
+              border: `3px solid ${A}`, background: BG, padding: 20,
+              boxShadow: `6px 6px 0 ${A}`, zIndex: 200, minWidth: 300,
+            }}>
+              <div style={{ fontWeight: 800, color: A, fontSize: 12, marginBottom: 12 }}>/// SHORTCUTS</div>
+              <pre style={{ fontSize: 11, lineHeight: 2, color: FG }}>
+{`⌘K     Search
+N      New node
+TAB    Cycle nodes
+←/→    Walk connections
+E      Export subgraph
+?      This help
+ESC    Close / deselect`}
+              </pre>
+              <div onClick={() => setShowHelp(false)} style={{
+                marginTop: 12, textAlign: 'center', color: DM, fontSize: 9, cursor: 'pointer',
+              }}>click or press ? to close</div>
+            </div>
+          )}
         </div>
 
         {/* RIGHT: Inspector */}
-        <div style={{ overflowY: 'auto', position: 'relative', zIndex: 100 }}>
+        <div style={{
+          overflowY: 'auto', position: 'relative', zIndex: 100,
+          width: rightOpen ? 320 : 0,
+          opacity: rightOpen ? 1 : 0,
+          overflowX: 'hidden',
+          transition: 'opacity 0.2s ease',
+        }}>
           <div style={{
             padding: '10px 14px', borderBottom: `3px solid ${BR}`,
             fontSize: 10, color: DM, fontWeight: 700, letterSpacing: '0.1em',
@@ -1306,6 +1480,7 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
                   alert(`Network error: ${err}`);
                 }
               }}
+              onExport={exportSubgraph}
             />
           </div>
         </div>

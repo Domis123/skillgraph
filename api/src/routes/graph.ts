@@ -21,6 +21,7 @@ graph.get('/', (c) => {
     updated: n.meta.updated,
   }));
 
+  // Only include edges where both nodes are active
   const edges = getEdges()
     .filter(e => activeIds.has(e.source) && activeIds.has(e.target))
     .map(e => ({
