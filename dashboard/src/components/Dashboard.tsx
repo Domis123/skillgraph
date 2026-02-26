@@ -168,7 +168,7 @@ function MEdge({
   );
 }
 
-// ── Node Component ──
+// ── Node Component (variable size based on connections) ──
 function MNode({
   node, isSel, dim, onClick, x, y,
 }: {
@@ -180,18 +180,27 @@ function MNode({
   const tm = TM[node.type] || TM.reference;
   const conns = node.connectionCount || 0;
 
+  // Scale node size by connection count
+  // 0-2 connections: compact (160px)
+  // 3-5: normal (190px)  
+  // 6+: hub (220px)
+  const nodeW = conns >= 6 ? 220 : conns >= 3 ? 190 : 160;
+  const nodeH = conns >= 6 ? 'auto' : 'auto';
+  const titleSize = conns >= 6 ? 13 : 12;
+  const isHub = conns >= 6;
+
   return (
     <div
       onClick={() => onClick(node)}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
-        position: 'absolute', left: x - 94, top: y - 30, width: 188,
-        padding: '10px 14px', cursor: 'pointer',
-        border: `3px solid ${isSel ? A : hov ? A : dim ? GR : BR}`,
+        position: 'absolute', left: x - nodeW / 2, top: y - 30, width: nodeW,
+        padding: isHub ? '12px 16px' : '10px 14px', cursor: 'pointer',
+        border: `${isHub ? 4 : 3}px solid ${isSel ? A : hov ? A : dim ? GR : BR}`,
         background: inv ? FG : BG, color: inv ? BG : FG,
-        boxShadow: inv ? `5px 5px 0 ${A}` : `4px 4px 0 #000`,
-        opacity: dim ? 0.1 : 1, zIndex: isSel ? 50 : hov ? 40 : 1,
+        boxShadow: inv ? `5px 5px 0 ${A}` : isHub ? `5px 5px 0 rgba(255,102,0,0.15)` : `4px 4px 0 #000`,
+        opacity: dim ? 0.1 : 1, zIndex: isSel ? 50 : hov ? 40 : isHub ? 5 : 1,
         fontFamily: "'JetBrains Mono', monospace",
         transform: hov && !isSel ? 'translate(-2px,-2px)' : 'none',
       }}
@@ -202,18 +211,17 @@ function MNode({
         color: inv ? BG : DM,
       }}>
         <span style={{ color: inv ? BG : tm.c, fontWeight: 700 }}>{tm.t}</span>
-        <span>{node.id.slice(0, 12).toUpperCase()}</span>
+        {isHub && <span style={{ color: inv ? BG : A, fontWeight: 700 }}>★</span>}
       </div>
-      <div style={{ fontWeight: 700, fontSize: 12, lineHeight: 1.3 }}>
-        {node.title.length > 28 ? node.title.slice(0, 28) + '…' : node.title}
+      <div style={{ fontWeight: 700, fontSize: titleSize, lineHeight: 1.3 }}>
+        {node.title.length > (isHub ? 36 : 28) ? node.title.slice(0, isHub ? 36 : 28) + '…' : node.title}
       </div>
       <div style={{
         marginTop: 7, paddingTop: 6,
         borderTop: `1px solid ${inv ? 'rgba(5,5,5,0.25)' : '#222'}`,
         fontSize: 9, color: inv ? BG : DM, display: 'flex', gap: 10,
       }}>
-        <span>{node.confidence.toUpperCase()}</span>
-        <span>CON:{conns}</span>
+        <span>{conns} links</span>
         <span>{node.domain}</span>
       </div>
     </div>
@@ -641,7 +649,7 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
         background: `repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(255,255,255,0.02) 2px,rgba(255,255,255,0.02) 4px)`,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <span style={{ fontWeight: 800, fontSize: 15, color: A }}>SKILLGRAPH_V0.9</span>
+          <span style={{ fontWeight: 800, fontSize: 15, color: A }}>SKILLGRAPH</span>
           <span style={{
             display: 'inline-block', width: 8, height: 8,
             background: A, animation: 'blink 2s steps(1) infinite',
@@ -649,6 +657,34 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
           <span style={{ fontSize: 10, color: DM }}>N:{stats.totalNodes}</span>
           <span style={{ fontSize: 10, color: DM }}>E:{stats.totalEdges}</span>
         </div>
+
+        {/* Persistent search bar */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          border: `2px solid ${searchQuery ? A : BR}`,
+          padding: '4px 12px', minWidth: 260,
+          background: searchQuery ? '#0a0a0a' : 'transparent',
+        }}>
+          <span style={{ color: searchQuery ? A : DM, fontSize: 11, fontWeight: 700 }}>&gt;</span>
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => setSearchOpen(true)}
+            placeholder="search..."
+            style={{
+              flex: 1, background: 'none', border: 'none', outline: 'none',
+              color: FG, fontSize: 12, fontFamily: "'JetBrains Mono', monospace",
+            }}
+          />
+          {searchQuery && (
+            <span
+              onClick={() => { setSearchQuery(''); setSearchOpen(false); }}
+              style={{ color: DM, cursor: 'pointer', fontSize: 11 }}
+            >×</span>
+          )}
+          <span style={{ fontSize: 8, color: DM, border: `1px solid ${BR}`, padding: '1px 4px' }}>⌘K</span>
+        </div>
+
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           {Object.entries(TM).filter(([k]) => k !== 'reference').map(([k, v]) => (
             <button
@@ -665,18 +701,6 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
               {v.t}
             </button>
           ))}
-          <div style={{ width: 1, height: 24, background: BR, margin: '0 8px' }} />
-          <button
-            onClick={() => setSearchOpen(true)}
-            style={{
-              padding: '5px 14px', border: `3px solid ${BR}`, background: BG,
-              color: DM, fontSize: 10, fontWeight: 700, cursor: 'pointer',
-              fontFamily: "'JetBrains Mono', monospace",
-              display: 'flex', alignItems: 'center', gap: 8,
-            }}
-          >
-            SEARCH <span style={{ fontSize: 9, border: `1px solid ${BR}`, padding: '1px 5px' }}>⌘K</span>
-          </button>
         </div>
       </div>
 
@@ -862,16 +886,64 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
         </div>
       </div>
 
-      {/* ── SEARCH MODAL ── */}
-      {searchOpen && (
-        <SearchModal
-          query={searchQuery}
-          setQuery={setSearchQuery}
-          results={searchResults}
-          loading={searchLoading}
-          onSelect={selectNode}
-          onClose={() => { setSearchOpen(false); setSearchQuery(''); }}
-        />
+      {/* ── SEARCH DROPDOWN ── */}
+      {searchOpen && searchQuery.trim() && (
+        <div
+          style={{
+            position: 'absolute', top: 48, left: '50%', transform: 'translateX(-50%)',
+            width: 500, maxHeight: 400, overflowY: 'auto',
+            border: `3px solid ${BR}`, borderTop: `3px solid ${A}`,
+            background: BG, boxShadow: `6px 6px 0 rgba(255,102,0,0.2)`,
+            zIndex: 200,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {searchLoading && (
+            <div style={{ padding: 16, textAlign: 'center', color: DM, fontSize: 11 }}>/// SEARCHING...</div>
+          )}
+          {!searchLoading && searchResults.length === 0 && (
+            <div style={{ padding: 20, textAlign: 'center', color: DM, fontSize: 11 }}>/// ZERO_RESULTS</div>
+          )}
+          {searchResults.map((r: any) => {
+            const tm = TM[r.type] || TM.reference;
+            return (
+              <div
+                key={r.id}
+                onClick={() => selectNode(r.id)}
+                style={{
+                  padding: '10px 16px', cursor: 'pointer',
+                  borderBottom: `1px solid ${GR}`,
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = FG;
+                  e.currentTarget.style.color = BG;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.color = FG;
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 12, fontWeight: 700, overflow: 'hidden',
+                    textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>{r.title}</div>
+                  <div style={{ fontSize: 10, opacity: 0.4, marginTop: 2 }}>
+                    {r.domain}
+                  </div>
+                </div>
+                <span style={{ fontSize: 9, fontWeight: 700, marginLeft: 12, color: tm.c }}>[{tm.t}]</span>
+              </div>
+            );
+          })}
+          <div style={{
+            padding: '6px 16px', borderTop: `1px solid ${GR}`,
+            fontSize: 9, color: DM,
+          }}>
+            {searchResults.length} found · ESC to close
+          </div>
+        </div>
       )}
     </div>
   );
