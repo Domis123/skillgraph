@@ -263,3 +263,106 @@ export function createNode(input: {
 
   return node;
 }
+
+/**
+ * Get recently updated nodes (changelog).
+ */
+export function getChangelog(limit: number = 20): VaultNode[] {
+  return getAllNodes()
+    .sort((a, b) => (b.meta.updated || '').localeCompare(a.meta.updated || ''))
+    .slice(0, limit);
+}
+
+/**
+ * Suggest connections for a new node based on keyword overlap.
+ * Compares title + tags + domain against existing nodes.
+ */
+export function suggestConnections(input: {
+  title: string;
+  domain: string;
+  tags: string[];
+  content: string;
+}): { id: string; title: string; type: string; domain: string; score: number; suggestedEdge: string }[] {
+  const words = new Set(
+    `${input.title} ${input.tags.join(' ')} ${input.content}`
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(w => w.length > 2)
+  );
+
+  const scores: { id: string; title: string; type: string; domain: string; score: number; suggestedEdge: string }[] = [];
+
+  for (const node of nodesCache.values()) {
+    let score = 0;
+    const nodeWords = `${node.meta.title} ${node.meta.tags.join(' ')} ${node.content}`
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(w => w.length > 2);
+
+    for (const w of nodeWords) {
+      if (words.has(w)) score++;
+    }
+
+    // Boost same domain
+    if (node.meta.domain === input.domain) score += 3;
+
+    // Boost shared tags
+    for (const t of node.meta.tags) {
+      if (input.tags.includes(t)) score += 2;
+    }
+
+    if (score > 2) {
+      // Suggest edge type based on node type
+      let suggestedEdge = 'related_to';
+      if (node.meta.type === 'project') suggestedEdge = 'part_of';
+      if (node.meta.type === 'concept') suggestedEdge = 'depends_on';
+      if (node.meta.type === 'tool') suggestedEdge = 'uses';
+
+      scores.push({
+        id: node.meta.id,
+        title: node.meta.title,
+        type: node.meta.type,
+        domain: node.meta.domain,
+        score,
+        suggestedEdge,
+      });
+    }
+  }
+
+  return scores.sort((a, b) => b.score - a.score).slice(0, 8);
+}
+
+/**
+ * Archive a node: set status to archived, move file to archive/ folder.
+ */
+export function archiveNode(id: string): VaultNode | null {
+  const node = nodesCache.get(id);
+  if (!node) return null;
+
+  // Update status
+  node.meta.status = 'archived';
+  node.meta.updated = new Date().toISOString().slice(0, 10);
+
+  // Rebuild file content
+  const fm = { ...node.meta };
+  const raw = matter.stringify(node.content, fm);
+
+  // Move to archive folder
+  const oldPath = path.join(VAULT_DIR, node.filePath);
+  const archiveName = `${node.meta.id}.md`;
+  const newRelPath = path.join('archive', archiveName);
+  const newFullPath = path.join(VAULT_DIR, newRelPath);
+
+  fs.mkdirSync(path.dirname(newFullPath), { recursive: true });
+  fs.writeFileSync(newFullPath, raw, 'utf-8');
+
+  // Remove old file
+  try { fs.unlinkSync(oldPath); } catch {}
+
+  // Update cache
+  node.raw = raw;
+  node.filePath = newRelPath;
+  nodesCache.set(id, node);
+
+  return node;
+}

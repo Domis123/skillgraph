@@ -482,6 +482,311 @@ function SearchModal({
   );
 }
 
+// ── Ingest Modal (Quick Capture) ──
+function IngestModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (id: string) => void;
+}) {
+  const [title, setTitle] = useState('');
+  const [type, setType] = useState('skill');
+  const [domain, setDomain] = useState('');
+  const [tags, setTags] = useState('');
+  const [content, setContent] = useState('');
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [selectedConns, setSelectedConns] = useState<Set<string>>(new Set());
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  // Auto-suggest connections when title/tags change
+  useEffect(() => {
+    if (title.length < 3) { setSuggestions([]); return; }
+    const t = setTimeout(() => {
+      fetch(`${API_BASE}/v1/suggest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, domain, tags: tags.split(',').map(t => t.trim()).filter(Boolean), content }),
+      })
+        .then(r => r.json())
+        .then(d => setSuggestions(d.suggestions || []))
+        .catch(() => {});
+    }, 400);
+    return () => clearTimeout(t);
+  }, [title, domain, tags, content]);
+
+  const toggleConn = (id: string) => {
+    setSelectedConns(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSubmit = async () => {
+    if (!title.trim()) { setError('Title required'); return; }
+    setSubmitting(true);
+    setError('');
+
+    const connections = suggestions
+      .filter(s => selectedConns.has(s.id))
+      .map(s => ({ target: s.id, edge: s.suggestedEdge }));
+
+    try {
+      const apiKey = prompt('Enter API key:');
+      if (!apiKey) { setSubmitting(false); return; }
+
+      const res = await fetch(`${API_BASE}/v1/ingest`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          type,
+          title: title.trim(),
+          domain: domain.trim() || 'uncategorized',
+          tags: tags.split(',').map(t => t.trim()).filter(Boolean),
+          content: content.trim() || `# ${title.trim()}\n\n(Content pending)`,
+          connections,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || 'Failed'); setSubmitting(false); return; }
+      onCreated(data.id);
+    } catch (e) {
+      setError('Network error');
+      setSubmitting(false);
+    }
+  };
+
+  const inputStyle = {
+    width: '100%', padding: '8px 12px',
+    background: '#0a0a0a', border: `2px solid ${BR}`, color: FG,
+    fontSize: 12, fontFamily: "'JetBrains Mono', monospace",
+    outline: 'none',
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)',
+        zIndex: 500, display: 'flex', alignItems: 'flex-start',
+        justifyContent: 'center', paddingTop: 60,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          width: 580, border: `3px solid ${BR}`, background: BG,
+          boxShadow: `6px 6px 0 ${A}`, maxHeight: '80vh', overflowY: 'auto',
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={{
+          padding: '12px 18px', borderBottom: `3px solid ${BR}`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span style={{ fontWeight: 800, fontSize: 13, color: A }}>+ NEW_NODE</span>
+          <span onClick={onClose} style={{ cursor: 'pointer', color: DM, padding: '0 6px' }}>
+            ESC
+          </span>
+        </div>
+
+        <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Type selector */}
+          <div>
+            <div style={{ fontSize: 9, color: DM, letterSpacing: '0.1em', marginBottom: 6, fontWeight: 700 }}>TYPE</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {Object.entries(TM).filter(([k]) => k !== 'reference').map(([k, v]) => (
+                <button
+                  key={k}
+                  onClick={() => setType(k)}
+                  style={{
+                    padding: '5px 12px', border: `2px solid ${type === k ? v.c : BR}`,
+                    background: type === k ? v.c : 'transparent',
+                    color: type === k ? BG : DM,
+                    fontSize: 9, fontWeight: 700, cursor: 'pointer',
+                    fontFamily: "'JetBrains Mono', monospace",
+                  }}
+                >
+                  {v.t}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Title */}
+          <div>
+            <div style={{ fontSize: 9, color: DM, letterSpacing: '0.1em', marginBottom: 6, fontWeight: 700 }}>TITLE</div>
+            <input
+              autoFocus
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="e.g. Webhook Deduplication Pattern"
+              style={inputStyle}
+            />
+          </div>
+
+          {/* Domain + Tags row */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 9, color: DM, letterSpacing: '0.1em', marginBottom: 6, fontWeight: 700 }}>DOMAIN</div>
+              <input
+                value={domain}
+                onChange={e => setDomain(e.target.value)}
+                placeholder="e.g. n8n"
+                style={inputStyle}
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: DM, letterSpacing: '0.1em', marginBottom: 6, fontWeight: 700 }}>TAGS (comma sep)</div>
+              <input
+                value={tags}
+                onChange={e => setTags(e.target.value)}
+                placeholder="webhooks, dedup"
+                style={inputStyle}
+              />
+            </div>
+          </div>
+
+          {/* Content */}
+          <div>
+            <div style={{ fontSize: 9, color: DM, letterSpacing: '0.1em', marginBottom: 6, fontWeight: 700 }}>CONTENT (markdown, optional now)</div>
+            <textarea
+              value={content}
+              onChange={e => setContent(e.target.value)}
+              placeholder="## Context&#10;&#10;Describe the pattern..."
+              rows={5}
+              style={{ ...inputStyle, resize: 'vertical' }}
+            />
+          </div>
+
+          {/* Auto-suggested connections */}
+          {suggestions.length > 0 && (
+            <div>
+              <div style={{ fontSize: 9, color: A, letterSpacing: '0.1em', marginBottom: 8, fontWeight: 700 }}>
+                /// SUGGESTED CONNECTIONS [{suggestions.length}]
+              </div>
+              {suggestions.map(s => {
+                const sel = selectedConns.has(s.id);
+                const tm = TM[s.type] || TM.reference;
+                return (
+                  <div
+                    key={s.id}
+                    onClick={() => toggleConn(s.id)}
+                    style={{
+                      padding: '7px 10px', cursor: 'pointer',
+                      borderBottom: `1px solid ${GR}`,
+                      background: sel ? `${A}15` : 'transparent',
+                      borderLeft: sel ? `3px solid ${A}` : `3px solid transparent`,
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    }}
+                  >
+                    <div>
+                      <span style={{ fontSize: 11, fontWeight: 700 }}>{s.title.slice(0, 40)}</span>
+                      <span style={{ fontSize: 9, color: DM, marginLeft: 8 }}>{s.suggestedEdge}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 9, color: tm.c }}>[{tm.t}]</span>
+                      <span style={{ fontSize: 11, color: sel ? A : BR }}>{sel ? '☑' : '☐'}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Error */}
+          {error && <div style={{ color: '#ff3333', fontSize: 11 }}>ERROR: {error}</div>}
+
+          {/* Submit */}
+          <button
+            onClick={handleSubmit}
+            disabled={submitting}
+            style={{
+              padding: '12px 0', border: `3px solid ${A}`,
+              background: A, color: BG, fontSize: 12, fontWeight: 800,
+              cursor: submitting ? 'wait' : 'pointer',
+              fontFamily: "'JetBrains Mono', monospace",
+              letterSpacing: '0.05em', opacity: submitting ? 0.6 : 1,
+            }}
+          >
+            {submitting ? '/// CREATING...' : 'CREATE_NODE'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Changelog Panel ──
+function ChangelogPanel({
+  entries,
+  onSelect,
+  onClose,
+}: {
+  entries: any[];
+  onSelect: (id: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div style={{
+      position: 'fixed', right: 0, top: 0, bottom: 0, width: 360,
+      background: BG, borderLeft: `3px solid ${BR}`,
+      boxShadow: '-6px 0 0 rgba(255,102,0,0.1)', zIndex: 300,
+      display: 'flex', flexDirection: 'column',
+    }}>
+      <div style={{
+        padding: '12px 16px', borderBottom: `3px solid ${BR}`,
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <span style={{ fontWeight: 800, fontSize: 12, color: A }}>/// CHANGELOG</span>
+        <span onClick={onClose} style={{ cursor: 'pointer', color: DM, fontSize: 14 }}>×</span>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {entries.length === 0 ? (
+          <div style={{ padding: 20, color: DM, fontSize: 11, textAlign: 'center' }}>/// NO_ENTRIES</div>
+        ) : entries.map((e: any, i: number) => {
+          const tm = TM[e.type] || TM.reference;
+          const isNew = e.created === e.updated;
+          return (
+            <div
+              key={`${e.id}-${i}`}
+              onClick={() => onSelect(e.id)}
+              style={{
+                padding: '10px 16px', cursor: 'pointer',
+                borderBottom: `1px solid ${GR}`,
+                borderLeft: `3px solid ${isNew ? '#33ff66' : A}`,
+              }}
+              onMouseEnter={(ev) => { ev.currentTarget.style.background = `${A}10`; }}
+              onMouseLeave={(ev) => { ev.currentTarget.style.background = 'transparent'; }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontSize: 9, color: tm.c, fontWeight: 700 }}>{tm.t}</span>
+                <span style={{
+                  fontSize: 8, padding: '2px 6px',
+                  background: isNew ? 'rgba(51,255,102,0.12)' : 'rgba(255,102,0,0.12)',
+                  color: isNew ? '#33ff66' : A,
+                  fontWeight: 700,
+                }}>
+                  {isNew ? 'NEW' : 'UPD'}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 700, lineHeight: 1.3 }}>{e.title}</div>
+              <div style={{ fontSize: 9, color: DM, marginTop: 4 }}>
+                {e.domain} · {e.updated}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════
 //  MAIN DASHBOARD
 // ═══════════════════════════════════════════════
@@ -509,6 +814,9 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
   const [searchLoading, setSearchLoading] = useState(false);
   const [filterType, setFilterType] = useState<string | null>(null);
   const [expandedDoms, setExpandedDoms] = useState<Record<string, boolean>>({});
+  const [ingestOpen, setIngestOpen] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
+  const [changelogData, setChangelogData] = useState<any[]>([]);
 
   const selNode = useMemo(() => nodes.find((n) => n.id === selId) || null, [nodes, selId]);
   const hovNode = useMemo(() => nodes.find((n) => n.id === hovId) || null, [nodes, hovId]);
@@ -617,18 +925,36 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
   // Keyboard shortcuts
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts when typing in an input
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setSearchOpen(true);
       }
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault();
+        setIngestOpen(true);
+      }
       if (e.key === 'Escape') {
-        if (searchOpen) setSearchOpen(false);
+        if (ingestOpen) setIngestOpen(false);
+        else if (searchOpen) setSearchOpen(false);
         else setSelId(null);
       }
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [searchOpen]);
+  }, [searchOpen, ingestOpen]);
+
+  // Fetch changelog when opened
+  useEffect(() => {
+    if (!changelogOpen) return;
+    fetch(`${API_BASE}/v1/changelog?limit=20`)
+      .then(r => r.json())
+      .then(d => setChangelogData(d.entries || []))
+      .catch(() => {});
+  }, [changelogOpen]);
 
   const selectNode = useCallback((id: string) => {
     setSelId(id);
@@ -701,6 +1027,30 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
               {v.t}
             </button>
           ))}
+          <div style={{ width: 1, height: 24, background: BR, margin: '0 4px' }} />
+          <button
+            onClick={() => setIngestOpen(true)}
+            style={{
+              padding: '4px 12px', border: `3px solid ${A}`,
+              background: `${A}20`, color: A,
+              fontSize: 9, fontWeight: 700, cursor: 'pointer',
+              fontFamily: "'JetBrains Mono', monospace",
+            }}
+          >
+            + NEW <span style={{ fontSize: 8, opacity: 0.6 }}>N</span>
+          </button>
+          <button
+            onClick={() => setChangelogOpen(!changelogOpen)}
+            style={{
+              padding: '4px 12px', border: `3px solid ${changelogOpen ? A : BR}`,
+              background: changelogOpen ? `${A}20` : BG,
+              color: changelogOpen ? A : DM,
+              fontSize: 9, fontWeight: 700, cursor: 'pointer',
+              fontFamily: "'JetBrains Mono', monospace",
+            }}
+          >
+            LOG
+          </button>
         </div>
       </div>
 
@@ -944,6 +1294,27 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
             {searchResults.length} found · ESC to close
           </div>
         </div>
+      )}
+
+      {/* ── INGEST MODAL ── */}
+      {ingestOpen && (
+        <IngestModal
+          onClose={() => setIngestOpen(false)}
+          onCreated={(id) => {
+            setIngestOpen(false);
+            // Reload page to show new node
+            window.location.reload();
+          }}
+        />
+      )}
+
+      {/* ── CHANGELOG PANEL ── */}
+      {changelogOpen && (
+        <ChangelogPanel
+          entries={changelogData}
+          onSelect={(id) => { selectNode(id); setChangelogOpen(false); }}
+          onClose={() => setChangelogOpen(false)}
+        />
       )}
     </div>
   );

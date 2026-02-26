@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { getNode, getAllNodes, getNodeConnections, createNode } from '../services/vault.js';
+import { getNode, getAllNodes, getNodeConnections, createNode, archiveNode } from '../services/vault.js';
 import { authMiddleware } from '../middleware/auth.js';
 
 const nodes = new Hono();
@@ -118,6 +118,19 @@ nodes.post('/', authMiddleware, async (c) => {
     id: node.meta.id,
     filePath: node.filePath,
   }, 201);
+});
+
+// DELETE /nodes/:id — archive a node (requires API key)
+nodes.delete('/:id', authMiddleware, (c) => {
+  const id = c.req.param('id');
+  const node = archiveNode(id);
+  if (!node) return c.json({ error: 'Node not found' }, 404);
+
+  return c.json({
+    archived: true,
+    id: node.meta.id,
+    filePath: node.filePath,
+  });
 });
 
 export default nodes;

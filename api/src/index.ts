@@ -7,6 +7,8 @@ import nodes from './routes/nodes.js';
 import search from './routes/search.js';
 import graph from './routes/graph.js';
 import ingest from './routes/ingest.js';
+import changelog from './routes/changelog.js';
+import suggest from './routes/suggest.js';
 
 const app = new Hono();
 
@@ -36,6 +38,8 @@ app.route('/v1/nodes', nodes);
 app.route('/v1/search', search);
 app.route('/v1/graph', graph);
 app.route('/v1/ingest', ingest);
+app.route('/v1/changelog', changelog);
+app.route('/v1/suggest', suggest);
 
 // ── Static MD serving (for AI chat access via URL) ──
 // GET /vault/skills/content-system/cms-schema-registry.md → raw markdown
