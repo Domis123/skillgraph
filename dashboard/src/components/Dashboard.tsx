@@ -1088,7 +1088,7 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
         height: 'calc(100vh - 48px)',
       }}>
         {/* LEFT: Domain tree */}
-        <div style={{ borderRight: `3px solid ${BR}`, overflowY: 'auto' }}>
+        <div style={{ borderRight: `3px solid ${BR}`, overflowY: 'auto', position: 'relative', zIndex: 100 }}>
           <div style={{
             padding: '10px 14px', borderBottom: `3px solid ${BR}`,
             fontSize: 10, color: DM, fontWeight: 700, letterSpacing: '0.1em',
@@ -1245,7 +1245,7 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
         </div>
 
         {/* RIGHT: Inspector */}
-        <div style={{ overflowY: 'auto' }}>
+        <div style={{ overflowY: 'auto', position: 'relative', zIndex: 100 }}>
           <div style={{
             padding: '10px 14px', borderBottom: `3px solid ${BR}`,
             fontSize: 10, color: DM, fontWeight: 700, letterSpacing: '0.1em',
