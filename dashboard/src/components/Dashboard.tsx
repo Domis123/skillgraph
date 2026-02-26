@@ -342,13 +342,20 @@ function Inspector({
           onClick={(e) => {
             e.preventDefault();
             const url = `${API_BASE}/v1/nodes/${node.id}/raw`;
-            try {
-              navigator.clipboard.writeText(url);
-              (e.target as HTMLElement).textContent = 'COPIED!';
-              setTimeout(() => { (e.target as HTMLElement).textContent = 'CP_URL'; }, 1500);
-            } catch {
-              window.prompt('Copy this URL:', url);
-            }
+            // Fallback copy method that always works
+            const ta = document.createElement('textarea');
+            ta.value = url;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            const el = e.currentTarget as HTMLElement;
+            el.textContent = 'COPIED!';
+            el.style.color = A;
+            el.style.borderColor = A;
+            setTimeout(() => { el.textContent = 'CP_URL'; el.style.color = DM; el.style.borderColor = BR; }, 1500);
           }}
           style={{
             flex: 1, padding: '9px 0', border: `3px solid ${BR}`,
