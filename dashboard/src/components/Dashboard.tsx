@@ -33,7 +33,10 @@ const EM: Record<string, string> = {
   supersedes: 'SUPERSEDES',
 };
 
-// ── Force Layout ──
+// ── Cluster Force Layout (Bubblemaps-style) ──
+// Each domain gets its own gravity well. Nodes repel strongly.
+// Connected nodes attract gently. Result: separated domain islands.
+
 function useForce(
   nodes: NodeMeta[],
   edges: GraphEdge[],
@@ -45,18 +48,32 @@ function useForce(
   const vr = useRef<Record<string, { x: number; y: number }>>({});
 
   useEffect(() => {
+    if (nodes.length === 0 || w === 0 || h === 0) return;
+
     const p: Record<string, { x: number; y: number }> = {};
     const v: Record<string, { x: number; y: number }> = {};
+
+    // Assign each domain a cluster center spread across the canvas
     const ds = [...new Set(nodes.map((n) => n.domain))];
-    const da: Record<string, number> = {};
+    const clusterCenters: Record<string, { x: number; y: number }> = {};
+    const margin = 250;
+    const cx = w / 2, cy = h / 2;
+    const clusterRadius = Math.min(w, h) * 0.32;
+
     ds.forEach((d, i) => {
-      da[d] = (i / ds.length) * Math.PI * 2;
+      const angle = (i / ds.length) * Math.PI * 2 - Math.PI / 2;
+      clusterCenters[d] = {
+        x: cx + Math.cos(angle) * clusterRadius,
+        y: cy + Math.sin(angle) * clusterRadius,
+      };
     });
 
+    // Initialize nodes near their cluster center
     nodes.forEach((n) => {
-      const a = da[n.domain] + (Math.random() - 0.5) * 0.6;
-      const r = 90 + Math.random() * 200;
-      p[n.id] = { x: w / 2 + Math.cos(a) * r, y: h / 2 + Math.sin(a) * r };
+      const cc = clusterCenters[n.domain];
+      const a = Math.random() * Math.PI * 2;
+      const r = 30 + Math.random() * 80;
+      p[n.id] = { x: cc.x + Math.cos(a) * r, y: cc.y + Math.sin(a) * r };
       v[n.id] = { x: 0, y: 0 };
     });
     pr.current = p;
@@ -64,40 +81,61 @@ function useForce(
 
     let i = 0;
     const tick = () => {
-      if (i++ > 400) return;
+      if (i++ > 500) return;
       const pp = pr.current;
       const vv = vr.current;
 
       nodes.forEach((n) => {
         let fx = 0, fy = 0;
+
+        // 1. Node-node repulsion (strong, keeps nodes apart)
         nodes.forEach((m) => {
           if (n.id === m.id) return;
           const dx = pp[n.id].x - pp[m.id].x;
           const dy = pp[n.id].y - pp[m.id].y;
           const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
-          fx += (dx / dist) * (15000 / (dist * dist));
-          fy += (dy / dist) * (15000 / (dist * dist));
+          const sameDomain = n.domain === m.domain;
+          // Stronger repulsion between domains, moderate within
+          const repForce = sameDomain ? 40000 : 80000;
+          fx += (dx / dist) * (repForce / (dist * dist));
+          fy += (dy / dist) * (repForce / (dist * dist));
         });
+
+        // 2. Edge attraction (gentle, pulls connected nodes closer)
         edges.forEach((e) => {
           const o = e.source === n.id ? e.target : e.target === n.id ? e.source : null;
           if (o && pp[o]) {
-            fx += (pp[o].x - pp[n.id].x) * 0.012;
-            fy += (pp[o].y - pp[n.id].y) * 0.012;
+            const dx = pp[o].x - pp[n.id].x;
+            const dy = pp[o].y - pp[n.id].y;
+            // Weaker attraction for cross-domain edges
+            const sameDom = nodes.find(nd => nd.id === o)?.domain === n.domain;
+            const strength = sameDom ? 0.008 : 0.003;
+            fx += dx * strength;
+            fy += dy * strength;
           }
         });
-        fx += (w / 2 - pp[n.id].x) * 0.004;
-        fy += (h / 2 - pp[n.id].y) * 0.004;
-        vv[n.id].x = (vv[n.id].x + fx) * 0.8;
-        vv[n.id].y = (vv[n.id].y + fy) * 0.8;
+
+        // 3. Domain cluster gravity (pulls nodes toward their cluster center)
+        const cc = clusterCenters[n.domain];
+        fx += (cc.x - pp[n.id].x) * 0.006;
+        fy += (cc.y - pp[n.id].y) * 0.006;
+
+        // 4. Very weak center gravity (prevents drift to infinity)
+        fx += (cx - pp[n.id].x) * 0.0005;
+        fy += (cy - pp[n.id].y) * 0.0005;
+
+        // Damping
+        vv[n.id].x = (vv[n.id].x + fx) * 0.75;
+        vv[n.id].y = (vv[n.id].y + fy) * 0.75;
       });
 
       nodes.forEach((n) => {
-        pp[n.id].x = Math.max(110, Math.min(w - 110, pp[n.id].x + vv[n.id].x));
-        pp[n.id].y = Math.max(40, Math.min(h - 40, pp[n.id].y + vv[n.id].y));
+        pp[n.id].x += vv[n.id].x;
+        pp[n.id].y += vv[n.id].y;
       });
 
       pr.current = { ...pp };
-      if (i % 5 === 0 || i >= 400) setPos({ ...pp });
+      if (i % 4 === 0 || i >= 500) setPos({ ...pp });
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -467,8 +505,54 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
   const selNode = useMemo(() => nodes.find((n) => n.id === selId) || null, [nodes, selId]);
   const hovNode = useMemo(() => nodes.find((n) => n.id === hovId) || null, [nodes, hovId]);
 
-  const GW = 820, GH = 700;
-  const pos = useForce(nodes, edges, GW, GH);
+  // Responsive graph area
+  const graphRef = useRef<HTMLDivElement>(null);
+  const [graphSize, setGraphSize] = useState({ w: 1200, h: 800 });
+
+  useEffect(() => {
+    const el = graphRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      if (width > 0 && height > 0) setGraphSize({ w: width, h: height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Pan & zoom
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, y: 0 });
+  const panOrigin = useRef({ x: 0, y: 0 });
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.92 : 1.08;
+    setZoom((z) => Math.max(0.3, Math.min(3, z * delta)));
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.target !== e.currentTarget && !(e.target as HTMLElement).closest('[data-graph-bg]')) return;
+    isPanning.current = true;
+    panStart.current = { x: e.clientX, y: e.clientY };
+    panOrigin.current = { ...pan };
+  }, [pan]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isPanning.current) return;
+    setPan({
+      x: panOrigin.current.x + (e.clientX - panStart.current.x),
+      y: panOrigin.current.y + (e.clientY - panStart.current.y),
+    });
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    isPanning.current = false;
+  }, []);
+
+  const pos = useForce(nodes, edges, graphSize.w / zoom, graphSize.h / zoom);
   const hasPos = Object.keys(pos).length > 0;
 
   // Connected node IDs for highlighting
@@ -669,8 +753,27 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
         </div>
 
         {/* CENTER: Graph */}
-        <div style={{ position: 'relative', overflow: 'hidden', borderRight: `3px solid ${BR}` }}>
-          {hasPos && edges.map((e, i) => {
+        <div
+          ref={graphRef}
+          onWheel={handleWheel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          data-graph-bg
+          style={{
+            position: 'relative', overflow: 'hidden',
+            borderRight: `3px solid ${BR}`, cursor: isPanning.current ? 'grabbing' : 'grab',
+          }}
+        >
+          {/* Pan/Zoom container */}
+          <div style={{
+            position: 'absolute', inset: 0,
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: '50% 50%',
+          }}>
+            {/* Edges */}
+            {hasPos && edges.map((e, i) => {
             const sp = pos[e.source], tp = pos[e.target];
             if (!sp || !tp) return null;
             if (filterType && (!filtIds.has(e.source) || !filtIds.has(e.target))) return null;
@@ -700,6 +803,43 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
               </div>
             );
           })}
+          </div>
+          {/* Zoom controls */}
+          <div style={{
+            position: 'absolute', bottom: 16, right: 16, display: 'flex',
+            flexDirection: 'column', gap: 4, zIndex: 10,
+          }}>
+            <button
+              onClick={() => setZoom((z) => Math.min(3, z * 1.2))}
+              style={{
+                width: 32, height: 32, border: `2px solid ${BR}`, background: BG,
+                color: FG, fontSize: 16, cursor: 'pointer',
+                fontFamily: "'JetBrains Mono', monospace", display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >+</button>
+            <button
+              onClick={() => setZoom((z) => Math.max(0.3, z * 0.8))}
+              style={{
+                width: 32, height: 32, border: `2px solid ${BR}`, background: BG,
+                color: FG, fontSize: 16, cursor: 'pointer',
+                fontFamily: "'JetBrains Mono', monospace", display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >−</button>
+            <button
+              onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
+              style={{
+                width: 32, height: 32, border: `2px solid ${BR}`, background: BG,
+                color: DM, fontSize: 8, cursor: 'pointer',
+                fontFamily: "'JetBrains Mono', monospace", display: 'flex',
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >RST</button>
+            <div style={{ fontSize: 8, color: DM, textAlign: 'center', marginTop: 4 }}>
+              {Math.round(zoom * 100)}%
+            </div>
+          </div>
         </div>
 
         {/* RIGHT: Inspector */}
