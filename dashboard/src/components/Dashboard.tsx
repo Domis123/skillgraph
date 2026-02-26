@@ -1289,7 +1289,7 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
                 } catch (err) {
                   alert(`Network error: ${err}`);
                 }
-              }}}
+              }}
             />
           </div>
         </div>
