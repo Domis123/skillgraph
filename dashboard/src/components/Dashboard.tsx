@@ -323,7 +323,7 @@ function Inspector({
       ) : null}
 
       {/* Action buttons */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, position: 'relative', zIndex: 200 }}>
         <a
           href={`${API_BASE}/v1/nodes/${node.id}/raw`}
           target="_blank"
@@ -335,46 +335,47 @@ function Inspector({
             textAlign: 'center', textDecoration: 'none', display: 'block',
           }}
         >
-          VIEW_RAW_MD
+          VIEW_RAW
         </a>
-        <button
+        <a
+          href="#"
           onClick={(e) => {
-            e.stopPropagation();
             e.preventDefault();
             const url = `${API_BASE}/v1/nodes/${node.id}/raw`;
-            navigator.clipboard.writeText(url).then(() => {
-              const btn = e.currentTarget;
-              btn.textContent = 'COPIED!';
-              setTimeout(() => { btn.textContent = 'CP_URL'; }, 1500);
-            }).catch(() => {
+            try {
+              navigator.clipboard.writeText(url);
+              (e.target as HTMLElement).textContent = 'COPIED!';
+              setTimeout(() => { (e.target as HTMLElement).textContent = 'CP_URL'; }, 1500);
+            } catch {
               window.prompt('Copy this URL:', url);
-            });
+            }
           }}
           style={{
             flex: 1, padding: '9px 0', border: `3px solid ${BR}`,
             background: 'transparent', color: DM, fontSize: 10, fontWeight: 700,
-            cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace",
-            letterSpacing: '0.04em',
+            fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.04em',
+            textAlign: 'center', textDecoration: 'none', display: 'block',
+            cursor: 'pointer',
           }}
         >
           CP_URL
-        </button>
-        <button
+        </a>
+        <a
+          href="#"
           onClick={(e) => {
-            e.stopPropagation();
             e.preventDefault();
-            const yes = window.confirm(`Archive "${node.title}"?\n\nThis moves it to the archive folder.`);
-            if (yes) onArchive(node.id);
+            if (window.confirm(`Archive "${node.title}"?`)) onArchive(node.id);
           }}
           style={{
             padding: '9px 8px', border: `3px solid #ff3333`,
             background: 'transparent', color: '#ff3333', fontSize: 10, fontWeight: 700,
-            cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace",
-            letterSpacing: '0.04em', minWidth: 50,
+            fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.04em',
+            textAlign: 'center', textDecoration: 'none', display: 'block',
+            cursor: 'pointer', minWidth: 50,
           }}
         >
           DEL
-        </button>
+        </a>
       </div>
 
       {/* Connections */}
