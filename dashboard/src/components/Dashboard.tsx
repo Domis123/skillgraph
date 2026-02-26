@@ -338,7 +338,18 @@ function Inspector({
           VIEW_RAW_MD
         </a>
         <button
-          onClick={() => navigator.clipboard.writeText(`${API_BASE}/v1/nodes/${node.id}/raw`)}
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            const url = `${API_BASE}/v1/nodes/${node.id}/raw`;
+            navigator.clipboard.writeText(url).then(() => {
+              const btn = e.currentTarget;
+              btn.textContent = 'COPIED!';
+              setTimeout(() => { btn.textContent = 'CP_URL'; }, 1500);
+            }).catch(() => {
+              window.prompt('Copy this URL:', url);
+            });
+          }}
           style={{
             flex: 1, padding: '9px 0', border: `3px solid ${BR}`,
             background: 'transparent', color: DM, fontSize: 10, fontWeight: 700,
@@ -349,14 +360,17 @@ function Inspector({
           CP_URL
         </button>
         <button
-          onClick={() => {
-            if (confirm(`Archive "${node.title}"?`)) onArchive(node.id);
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            const yes = window.confirm(`Archive "${node.title}"?\n\nThis moves it to the archive folder.`);
+            if (yes) onArchive(node.id);
           }}
           style={{
-            padding: '9px 0', border: `3px solid #ff3333`,
+            padding: '9px 8px', border: `3px solid #ff3333`,
             background: 'transparent', color: '#ff3333', fontSize: 10, fontWeight: 700,
             cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace",
-            letterSpacing: '0.04em', width: 40,
+            letterSpacing: '0.04em', minWidth: 50,
           }}
         >
           DEL
@@ -1251,17 +1265,23 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
                 try {
                   const res = await fetch(`${API_BASE}/v1/nodes/${id}`, {
                     method: 'DELETE',
-                    headers: { 'Authorization': `Bearer ${apiKey}` },
+                    headers: {
+                      'Authorization': `Bearer ${apiKey}`,
+                      'Content-Type': 'application/json',
+                    },
                   });
+                  const d = await res.json().catch(() => ({}));
                   if (res.ok) {
+                    alert('Archived successfully');
                     setSelId(null);
                     window.location.reload();
                   } else {
-                    const d = await res.json();
-                    alert(d.error || 'Archive failed');
+                    alert(`Archive failed: ${d.error || res.status}`);
                   }
-                } catch { alert('Network error'); }
-              }}
+                } catch (err) {
+                  alert(`Network error: ${err}`);
+                }
+              }}}
             />
           </div>
         </div>
