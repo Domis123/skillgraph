@@ -230,13 +230,14 @@ function MNode({
 
 // ── Inspector ──
 function Inspector({
-  node, detail, loading, onClose, onNav,
+  node, detail, loading, onClose, onNav, onArchive,
 }: {
   node: NodeMeta | null;
   detail: NodeFull | null;
   loading: boolean;
   onClose: () => void;
   onNav: (id: string) => void;
+  onArchive: (id: string) => void;
 }) {
   if (!node) return (
     <div style={{ color: DM, fontSize: 11 }}>
@@ -346,6 +347,19 @@ function Inspector({
           }}
         >
           CP_URL
+        </button>
+        <button
+          onClick={() => {
+            if (confirm(`Archive "${node.title}"?`)) onArchive(node.id);
+          }}
+          style={{
+            padding: '9px 0', border: `3px solid #ff3333`,
+            background: 'transparent', color: '#ff3333', fontSize: 10, fontWeight: 700,
+            cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace",
+            letterSpacing: '0.04em', width: 40,
+          }}
+        >
+          DEL
         </button>
       </div>
 
@@ -1231,6 +1245,23 @@ export function Dashboard({ graphData, stats }: DashboardProps) {
               loading={detailLoading}
               onClose={() => setSelId(null)}
               onNav={selectNode}
+              onArchive={async (id) => {
+                const apiKey = prompt('Enter API key to archive:');
+                if (!apiKey) return;
+                try {
+                  const res = await fetch(`${API_BASE}/v1/nodes/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${apiKey}` },
+                  });
+                  if (res.ok) {
+                    setSelId(null);
+                    window.location.reload();
+                  } else {
+                    const d = await res.json();
+                    alert(d.error || 'Archive failed');
+                  }
+                } catch { alert('Network error'); }
+              }}
             />
           </div>
         </div>
