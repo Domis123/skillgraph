@@ -5,7 +5,11 @@ const graph = new Hono();
 
 // GET /graph — full graph data (nodes + edges) for dashboard
 graph.get('/', (c) => {
-  const nodes = getAllNodes().map(n => ({
+  const allNodes = getAllNodes();
+  const activeNodes = allNodes.filter(n => n.meta.status !== 'archived');
+  const activeIds = new Set(activeNodes.map(n => n.meta.id));
+
+  const nodes = activeNodes.map(n => ({
     id: n.meta.id,
     type: n.meta.type,
     title: n.meta.title,
@@ -17,11 +21,13 @@ graph.get('/', (c) => {
     updated: n.meta.updated,
   }));
 
-  const edges = getEdges().map(e => ({
-    source: e.source,
-    target: e.target,
-    type: e.type,
-  }));
+  const edges = getEdges()
+    .filter(e => activeIds.has(e.source) && activeIds.has(e.target))
+    .map(e => ({
+      source: e.source,
+      target: e.target,
+      type: e.type,
+    }));
 
   return c.json({ nodes, edges });
 });
