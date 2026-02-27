@@ -41,7 +41,7 @@ ingest.post('/', authMiddleware, async (c) => {
       content: body.content,
     });
     autoConns = suggestions
-      .filter(s => s.score > 3)
+      .filter(s => s.score > 8)
       .slice(0, 5)
       .map(s => ({ target: s.id, edge: s.suggestedEdge }));
   }

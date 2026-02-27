@@ -308,7 +308,7 @@ export function getChangelog(limit: number = 20): VaultNode[] {
 
 /**
  * Suggest connections for a new node based on keyword overlap.
- * Compares title + tags + domain against existing nodes.
+ * Uses strict scoring to avoid noise connections.
  */
 export function suggestConnections(input: {
   title: string;
@@ -316,36 +316,69 @@ export function suggestConnections(input: {
   tags: string[];
   content: string;
 }): { id: string; title: string; type: string; domain: string; score: number; suggestedEdge: string }[] {
-  const words = new Set(
+  // Common words that inflate scores without meaning
+  const stopWords = new Set([
+    'the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'was', 'has', 'have',
+    'not', 'but', 'can', 'will', 'use', 'used', 'using', 'how', 'what', 'when', 'why',
+    'n8n', 'node', 'workflow', 'content', 'system', 'data', 'should', 'each', 'also',
+    'example', 'because', 'like', 'into', 'then', 'first', 'new', 'get', 'set',
+    'code', 'value', 'type', 'name', 'output', 'input', 'error', 'file', 'step',
+  ]);
+
+  const inputWords = new Set(
     `${input.title} ${input.tags.join(' ')} ${input.content}`
       .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter(w => w.length > 2)
+      .split(/[^a-z0-9-]+/)
+      .filter(w => w.length > 3 && !stopWords.has(w))
+  );
+
+  // Extract title words separately for stronger matching
+  const titleWords = new Set(
+    input.title.toLowerCase()
+      .split(/[^a-z0-9-]+/)
+      .filter(w => w.length > 3 && !stopWords.has(w))
   );
 
   const scores: { id: string; title: string; type: string; domain: string; score: number; suggestedEdge: string }[] = [];
 
   for (const node of nodesCache.values()) {
     let score = 0;
-    const nodeWords = `${node.meta.title} ${node.meta.tags.join(' ')} ${node.content}`
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter(w => w.length > 2);
 
-    for (const w of nodeWords) {
-      if (words.has(w)) score++;
+    const nodeTitleWords = node.meta.title.toLowerCase()
+      .split(/[^a-z0-9-]+/)
+      .filter(w => w.length > 3 && !stopWords.has(w));
+
+    const nodeContentWords = node.content.toLowerCase()
+      .split(/[^a-z0-9-]+/)
+      .filter(w => w.length > 3 && !stopWords.has(w));
+
+    // Title-to-title overlap (strongest signal)
+    for (const w of nodeTitleWords) {
+      if (titleWords.has(w)) score += 4;
     }
 
-    // Boost same domain
-    if (node.meta.domain === input.domain) score += 3;
+    // Title-to-content overlap (medium signal)
+    for (const w of nodeTitleWords) {
+      if (inputWords.has(w) && !titleWords.has(w)) score += 2;
+    }
 
-    // Boost shared tags
+    // Content-to-content overlap (weak signal, cap at 6)
+    let contentOverlap = 0;
+    for (const w of nodeContentWords) {
+      if (inputWords.has(w)) contentOverlap++;
+    }
+    score += Math.min(contentOverlap, 6);
+
+    // Shared tags (only specific tags, not generic ones)
+    const genericTags = new Set(['n8n', 'bug', 'pipeline', 'production', 'prompt-engineering']);
     for (const t of node.meta.tags) {
-      if (input.tags.includes(t)) score += 2;
+      if (input.tags.includes(t) && !genericTags.has(t)) score += 3;
     }
 
-    if (score > 2) {
-      // Suggest edge type based on node type
+    // Same domain: small bonus only
+    if (node.meta.domain === input.domain) score += 1;
+
+    if (score > 8) {
       let suggestedEdge = 'related_to';
       if (node.meta.type === 'project') suggestedEdge = 'part_of';
       if (node.meta.type === 'concept') suggestedEdge = 'depends_on';
@@ -362,7 +395,7 @@ export function suggestConnections(input: {
     }
   }
 
-  return scores.sort((a, b) => b.score - a.score).slice(0, 8);
+  return scores.sort((a, b) => b.score - a.score).slice(0, 5);
 }
 
 /**
