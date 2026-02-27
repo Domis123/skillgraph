@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
-import { getNode, getAllNodes, getNodeConnections, createNode, archiveNode } from '../services/vault.js';
+import { getNode, getAllNodes, getNodeConnections, createNode, archiveNode, addConnections } from '../services/vault.js';
+import { suggestConnections } from '../services/vault.js';
 import { authMiddleware } from '../middleware/auth.js';
 
 const nodes = new Hono();
@@ -118,6 +119,44 @@ nodes.post('/', authMiddleware, async (c) => {
     id: node.meta.id,
     filePath: node.filePath,
   }, 201);
+});
+
+// PATCH /nodes/:id/connections — add connections to existing node (requires API key)
+nodes.patch('/:id/connections', authMiddleware, async (c) => {
+  const id = c.req.param('id');
+  const body = await c.req.json();
+
+  if (!body.connections || !Array.isArray(body.connections)) {
+    return c.json({ error: 'Missing field: connections (array of {target, edge})' }, 400);
+  }
+
+  const node = addConnections(id, body.connections);
+  if (!node) return c.json({ error: 'Node not found' }, 404);
+
+  return c.json({
+    updated: true,
+    id: node.meta.id,
+    connectionCount: node.meta.connections.length,
+  });
+});
+
+// POST /nodes/bulk-connect — connect multiple nodes at once (requires API key)
+nodes.post('/bulk-connect', authMiddleware, async (c) => {
+  const body = await c.req.json();
+
+  if (!body.connections || !Array.isArray(body.connections)) {
+    return c.json({ error: 'Missing field: connections (array of {source, target, edge})' }, 400);
+  }
+
+  const results: any[] = [];
+  for (const conn of body.connections) {
+    if (!conn.source || !conn.target || !conn.edge) continue;
+    const node = addConnections(conn.source, [{ target: conn.target, edge: conn.edge }]);
+    if (node) results.push({ source: conn.source, target: conn.target, edge: conn.edge, ok: true });
+    else results.push({ source: conn.source, target: conn.target, error: 'source not found' });
+  }
+
+  return c.json({ processed: results.length, results });
 });
 
 // DELETE /nodes/:id — archive a node (requires API key)

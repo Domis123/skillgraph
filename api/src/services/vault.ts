@@ -265,6 +265,39 @@ export function createNode(input: {
 }
 
 /**
+ * Add connections to an existing node (doesn't remove existing ones).
+ */
+export function addConnections(id: string, newConns: { target: string; edge: string }[]): VaultNode | null {
+  const node = nodesCache.get(id);
+  if (!node) return null;
+
+  // Deduplicate: skip connections that already exist
+  const existing = new Set(node.meta.connections.map(c => `${c.target}:${c.edge}`));
+  const toAdd = newConns.filter(c => !existing.has(`${c.target}:${c.edge}`));
+  if (toAdd.length === 0) return node;
+
+  node.meta.connections.push(...toAdd);
+  node.meta.updated = new Date().toISOString().slice(0, 10);
+
+  // Rebuild file
+  const fm = { ...node.meta };
+  node.raw = matter.stringify(node.content, fm);
+
+  const fullPath = path.join(VAULT_DIR, node.filePath);
+  fs.writeFileSync(fullPath, node.raw, 'utf-8');
+
+  // Update edge cache
+  for (const conn of toAdd) {
+    if (conn.target && getNode(conn.target)) {
+      edgesCache.push({ source: id, target: conn.target, type: conn.edge });
+    }
+  }
+
+  nodesCache.set(id, node);
+  return node;
+}
+
+/**
  * Get recently updated nodes (changelog).
  */
 export function getChangelog(limit: number = 20): VaultNode[] {
