@@ -204,13 +204,21 @@ export function createNode(input: {
   connections?: { target: string; edge: string }[];
   content: string;
 }): VaultNode {
+  // Normalize tags: handle string, array, or missing
+  let normalizedTags: string[] = [];
+  if (Array.isArray(input.tags)) {
+    normalizedTags = input.tags.map(String);
+  } else if (typeof input.tags === 'string') {
+    normalizedTags = input.tags.replace(/^\[|\]$/g, '').split(',').map(t => t.trim()).filter(Boolean);
+  }
+
   const now = new Date().toISOString().slice(0, 10);
   const meta: NodeMeta = {
     id: input.id,
     type: input.type,
     title: input.title,
     domain: input.domain,
-    tags: input.tags || [],
+    tags: normalizedTags,
     status: 'active',
     confidence: input.confidence || 'medium',
     created: now,

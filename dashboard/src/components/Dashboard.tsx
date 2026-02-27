@@ -300,7 +300,7 @@ function Inspector({
         ['STATUS', node.status?.toUpperCase() || 'ACTIVE', true],
         ['CONFIDENCE', node.confidence?.toUpperCase() || '-', false],
         ['DOMAIN', node.domain, false],
-        ['TAGS', node.tags?.join(', ') || '-', false],
+        ['TAGS', Array.isArray(node.tags) ? node.tags.join(', ') : (node.tags || '-'), false],
         ['UPDATED', node.updated || '-', false],
       ].map(([k, v, hl]) => (
         <div key={k as string} style={{
