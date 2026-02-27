@@ -5,17 +5,20 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "sh start.sh",
+    "index": "tsx src/scripts/rebuild-index.ts"
   },
   "dependencies": {
     "hono": "^4.0.0",
     "gray-matter": "^4.0.3",
+    "better-sqlite3": "^11.0.0",
     "@hono/node-server": "^1.8.0",
-    "glob": "^10.3.0"
+    "glob": "^11.0.0"
   },
   "devDependencies": {
     "tsx": "^4.7.0",
     "typescript": "^5.3.0",
+    "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^20.0.0"
   }
 }
