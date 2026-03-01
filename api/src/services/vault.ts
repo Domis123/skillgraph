@@ -273,6 +273,64 @@ export function createNode(input: {
 }
 
 /**
+ * Update an existing node's metadata and/or content.
+ */
+export function updateNode(id: string, updates: {
+  title?: string;
+  domain?: string;
+  tags?: string[];
+  confidence?: string;
+  content?: string;
+  connections?: { target: string; edge: string }[];
+}): VaultNode | null {
+  const node = nodesCache.get(id);
+  if (!node) return null;
+
+  // Apply updates
+  if (updates.title !== undefined) node.meta.title = updates.title;
+  if (updates.domain !== undefined) node.meta.domain = updates.domain;
+  if (updates.tags !== undefined) {
+    node.meta.tags = Array.isArray(updates.tags)
+      ? updates.tags.map(String)
+      : (updates.tags as string).replace(/^\[|\]$/g, '').split(',').map(t => t.trim()).filter(Boolean);
+  }
+  if (updates.confidence !== undefined) node.meta.confidence = updates.confidence;
+  if (updates.content !== undefined) node.content = updates.content;
+  if (updates.connections !== undefined) node.meta.connections = updates.connections;
+
+  node.meta.updated = new Date().toISOString().slice(0, 10);
+
+  // Rebuild file
+  const fm = {
+    id: node.meta.id,
+    type: node.meta.type,
+    title: node.meta.title,
+    domain: node.meta.domain,
+    tags: node.meta.tags,
+    status: node.meta.status,
+    confidence: node.meta.confidence,
+    created: node.meta.created,
+    updated: node.meta.updated,
+    connections: node.meta.connections,
+  };
+  node.raw = matter.stringify(node.content, fm);
+
+  const fullPath = path.join(VAULT_DIR, node.filePath);
+  fs.writeFileSync(fullPath, node.raw, 'utf-8');
+
+  // Rebuild edges for this node
+  edgesCache = edgesCache.filter(e => e.source !== id);
+  for (const conn of node.meta.connections) {
+    if (conn.target && nodesCache.has(conn.target)) {
+      edgesCache.push({ source: id, target: conn.target, type: conn.edge });
+    }
+  }
+
+  nodesCache.set(id, node);
+  return node;
+}
+
+/**
  * Add connections to an existing node (doesn't remove existing ones).
  */
 export function addConnections(id: string, newConns: { target: string; edge: string }[]): VaultNode | null {

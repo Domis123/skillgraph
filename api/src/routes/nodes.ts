@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { getNode, getAllNodes, getNodeConnections, createNode, archiveNode, addConnections } from '../services/vault.js';
+import { getNode, getAllNodes, getNodeConnections, createNode, archiveNode, addConnections, updateNode } from '../services/vault.js';
 import { suggestConnections } from '../services/vault.js';
 import { authMiddleware } from '../middleware/auth.js';
 
@@ -119,6 +119,33 @@ nodes.post('/', authMiddleware, async (c) => {
     id: node.meta.id,
     filePath: node.filePath,
   }, 201);
+});
+
+// PATCH /nodes/:id — update node metadata/content (requires API key)
+nodes.patch('/:id', authMiddleware, async (c) => {
+  const id = c.req.param('id');
+  const body = await c.req.json();
+
+  const node = updateNode(id, {
+    title: body.title,
+    domain: body.domain,
+    tags: body.tags,
+    confidence: body.confidence,
+    content: body.content,
+    connections: body.connections,
+  });
+
+  if (!node) return c.json({ error: 'Node not found' }, 404);
+
+  return c.json({
+    updated: true,
+    id: node.meta.id,
+    title: node.meta.title,
+    domain: node.meta.domain,
+    tags: node.meta.tags,
+    confidence: node.meta.confidence,
+    connectionCount: node.meta.connections.length,
+  });
 });
 
 // PATCH /nodes/:id/connections — add connections to existing node (requires API key)

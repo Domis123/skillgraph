@@ -181,13 +181,18 @@ function MNode({
   const conns = node.connectionCount || 0;
 
   // Scale node size by connection count
-  // 0-2 connections: compact (160px)
-  // 3-5: normal (190px)  
-  // 6+: hub (220px)
   const nodeW = conns >= 6 ? 220 : conns >= 3 ? 190 : 160;
-  const nodeH = conns >= 6 ? 'auto' : 'auto';
   const titleSize = conns >= 6 ? 13 : 12;
   const isHub = conns >= 6;
+
+  // Strength = confidence + normalized connection count
+  const confScore = node.confidence === 'high' ? 3 : node.confidence === 'medium' ? 2 : 1;
+  const connScore = Math.min(conns / 3, 3); // cap at 3
+  const strength = (confScore + connScore) / 6; // 0-1
+
+  // Strength ring color and glow
+  const glowAlpha = (strength * 0.5).toFixed(2);
+  const ringColor = strength > 0.7 ? A : strength > 0.4 ? '#ffaa33' : '#555';
 
   return (
     <div
@@ -198,8 +203,10 @@ function MNode({
         position: 'absolute', left: x - nodeW / 2, top: y - 30, width: nodeW,
         padding: isHub ? '12px 16px' : '10px 14px', cursor: 'pointer',
         border: `${isHub ? 4 : 3}px solid ${isSel ? A : hov ? A : dim ? GR : BR}`,
+        borderLeftColor: isSel ? A : hov ? A : dim ? GR : ringColor,
+        borderLeftWidth: isSel || hov ? (isHub ? 4 : 3) : 5,
         background: inv ? FG : BG, color: inv ? BG : FG,
-        boxShadow: inv ? `5px 5px 0 ${A}` : isHub ? `5px 5px 0 rgba(255,102,0,0.15)` : `4px 4px 0 #000`,
+        boxShadow: inv ? `5px 5px 0 ${A}` : isHub ? `5px 5px 0 rgba(255,102,0,${glowAlpha})` : `4px 4px 0 #000`,
         opacity: dim ? 0.1 : 1, zIndex: isSel ? 50 : hov ? 40 : isHub ? 5 : 1,
         fontFamily: "'JetBrains Mono', monospace",
         transform: hov && !isSel ? 'translate(-2px,-2px)' : 'none',
@@ -211,7 +218,12 @@ function MNode({
         color: inv ? BG : DM,
       }}>
         <span style={{ color: inv ? BG : tm.c, fontWeight: 700 }}>{tm.t}</span>
-        {isHub && <span style={{ color: inv ? BG : A, fontWeight: 700 }}>★</span>}
+        <span style={{ display: 'flex', gap: 3 }}>
+          {isHub && <span style={{ color: inv ? BG : A, fontWeight: 700 }}>★</span>}
+          <span style={{ color: inv ? BG : ringColor, fontSize: 8 }}>
+            {'●'.repeat(Math.ceil(strength * 3))}{'○'.repeat(3 - Math.ceil(strength * 3))}
+          </span>
+        </span>
       </div>
       <div style={{ fontWeight: 700, fontSize: titleSize, lineHeight: 1.3 }}>
         {node.title.length > (isHub ? 36 : 28) ? node.title.slice(0, isHub ? 36 : 28) + '…' : node.title}
@@ -228,9 +240,26 @@ function MNode({
   );
 }
 
+// Simple inline markdown renderer
+function renderInline(text: string) {
+  const parts: (string | JSX.Element)[] = [];
+  let i = 0;
+  const regex = /(\*\*(.+?)\*\*|`(.+?)`)/g;
+  let match;
+  let lastIdx = 0;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIdx) parts.push(text.slice(lastIdx, match.index));
+    if (match[2]) parts.push(<strong key={i++} style={{ color: FG, fontWeight: 700 }}>{match[2]}</strong>);
+    if (match[3]) parts.push(<code key={i++} style={{ background: '#1a1a1a', padding: '1px 4px', fontSize: 10, color: A }}>{match[3]}</code>);
+    lastIdx = match.index + match[0].length;
+  }
+  if (lastIdx < text.length) parts.push(text.slice(lastIdx));
+  return <>{parts}</>;
+}
+
 // ── Inspector ──
 function Inspector({
-  node, detail, loading, onClose, onNav, onArchive, onExport,
+  node, detail, loading, onClose, onNav, onArchive, onExport, onUpdate,
 }: {
   node: NodeMeta | null;
   detail: NodeFull | null;
@@ -239,7 +268,14 @@ function Inspector({
   onNav: (id: string) => void;
   onArchive: (id: string) => void;
   onExport: (id: string) => void;
+  onUpdate: () => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [editTags, setEditTags] = useState('');
+  const [editDomain, setEditDomain] = useState('');
+  const [editConfidence, setEditConfidence] = useState('');
+  const [saving, setSaving] = useState(false);
   if (!node) return (
     <div style={{ color: DM, fontSize: 11 }}>
       <div style={{ marginBottom: 12 }}>/// AWAITING_SELECTION</div>
@@ -315,19 +351,105 @@ function Inspector({
       {/* Content */}
       {loading ? (
         <div style={{ padding: '20px 0', color: DM, fontSize: 11 }}>/// LOADING_CONTENT...</div>
-      ) : detail ? (
-        <pre style={{
+      ) : detail && !editing ? (
+        <div style={{
           border: `1px solid ${BR}`, padding: 12, margin: '14px 0',
           background: '#0a0a0a', fontSize: 11, lineHeight: 1.7, color: '#aaa',
-          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-          maxHeight: 200, overflowY: 'auto',
+          maxHeight: 250, overflowY: 'auto',
         }}>
-          {detail.content.slice(0, 800)}{detail.content.length > 800 ? '\n\n[...]' : ''}
-        </pre>
+          {detail.content.split('\n').map((line, i) => {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('## ')) return <div key={i} style={{ color: A, fontWeight: 700, fontSize: 12, marginTop: i > 0 ? 12 : 0, marginBottom: 4 }}>{trimmed.slice(3)}</div>;
+            if (trimmed.startsWith('### ')) return <div key={i} style={{ color: FG, fontWeight: 700, fontSize: 11, marginTop: 8, marginBottom: 2 }}>{trimmed.slice(4)}</div>;
+            if (trimmed.startsWith('- ')) return <div key={i} style={{ paddingLeft: 12 }}><span style={{ color: A }}>▸</span> {renderInline(trimmed.slice(2))}</div>;
+            if (trimmed.startsWith('```')) return <div key={i} style={{ color: DM, fontSize: 9 }}>{trimmed}</div>;
+            if (trimmed === '') return <div key={i} style={{ height: 6 }} />;
+            return <div key={i}>{renderInline(trimmed)}</div>;
+          })}
+        </div>
+      ) : detail && editing ? (
+        <div style={{ margin: '14px 0' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+            <div>
+              <label style={{ fontSize: 8, color: DM, display: 'block', marginBottom: 2 }}>DOMAIN</label>
+              <input value={editDomain} onChange={e => setEditDomain(e.target.value)}
+                style={{ width: '100%', background: '#0a0a0a', border: `1px solid ${BR}`, color: FG, padding: 6, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 8, color: DM, display: 'block', marginBottom: 2 }}>CONFIDENCE</label>
+              <select value={editConfidence} onChange={e => setEditConfidence(e.target.value)}
+                style={{ width: '100%', background: '#0a0a0a', border: `1px solid ${BR}`, color: FG, padding: 6, fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
+                <option value="high">high</option>
+                <option value="medium">medium</option>
+                <option value="low">low</option>
+              </select>
+            </div>
+          </div>
+          <label style={{ fontSize: 8, color: DM, display: 'block', marginBottom: 2 }}>TAGS (comma-separated)</label>
+          <input value={editTags} onChange={e => setEditTags(e.target.value)}
+            style={{ width: '100%', background: '#0a0a0a', border: `1px solid ${BR}`, color: FG, padding: 6, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", marginBottom: 8 }} />
+          <label style={{ fontSize: 8, color: DM, display: 'block', marginBottom: 2 }}>CONTENT (markdown)</label>
+          <textarea value={editContent} onChange={e => setEditContent(e.target.value)}
+            rows={12} style={{ width: '100%', background: '#0a0a0a', border: `1px solid ${BR}`, color: FG, padding: 8, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", resize: 'vertical', lineHeight: 1.6 }} />
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button onClick={async () => {
+              const apiKey = prompt('API key:');
+              if (!apiKey) return;
+              setSaving(true);
+              try {
+                const res = await fetch(`${API_BASE}/v1/nodes/${node.id}`, {
+                  method: 'PATCH',
+                  headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    domain: editDomain,
+                    confidence: editConfidence,
+                    tags: editTags.split(',').map(t => t.trim()).filter(Boolean),
+                    content: editContent,
+                  }),
+                });
+                if (res.ok) { setEditing(false); onUpdate(); }
+                else { const d = await res.json().catch(() => ({})); alert(`Save failed: ${d.error || res.status}`); }
+              } catch (err) { alert(`Error: ${err}`); }
+              setSaving(false);
+            }} style={{
+              flex: 1, padding: '8px 0', border: `3px solid ${A}`, background: `${A}20`,
+              color: A, fontSize: 10, fontWeight: 700, cursor: 'pointer',
+              fontFamily: "'JetBrains Mono', monospace",
+            }}>{saving ? 'SAVING...' : 'SAVE'}</button>
+            <button onClick={() => setEditing(false)} style={{
+              padding: '8px 12px', border: `3px solid ${BR}`, background: 'transparent',
+              color: DM, fontSize: 10, fontWeight: 700, cursor: 'pointer',
+              fontFamily: "'JetBrains Mono', monospace",
+            }}>CANCEL</button>
+          </div>
+        </div>
       ) : null}
 
       {/* Action buttons */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, position: 'relative', zIndex: 200 }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, position: 'relative', zIndex: 200, flexWrap: 'wrap' }}>
+        <a
+          href="#"
+          onClick={(e) => {
+            e.preventDefault();
+            if (detail) {
+              setEditContent(detail.content);
+              setEditTags(Array.isArray(node.tags) ? node.tags.join(', ') : (node.tags || ''));
+              setEditDomain(node.domain);
+              setEditConfidence(node.confidence || 'medium');
+              setEditing(true);
+            }
+          }}
+          style={{
+            padding: '9px 8px', border: `3px solid ${editing ? A : '#33aaff'}`,
+            background: editing ? `${A}15` : 'transparent', color: editing ? A : '#33aaff',
+            fontSize: 10, fontWeight: 700,
+            fontFamily: "'JetBrains Mono', monospace", letterSpacing: '0.04em',
+            textAlign: 'center', textDecoration: 'none', display: 'block',
+            cursor: detail ? 'pointer' : 'not-allowed', opacity: detail ? 1 : 0.4,
+          }}
+        >
+          EDIT
+        </a>
         <a
           href={`${API_BASE}/v1/nodes/${node.id}/raw`}
           target="_blank"
@@ -883,6 +1005,7 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [filterType, setFilterType] = useState<string | null>(null);
+  const [filterDomain, setFilterDomain] = useState<string | null>(null);
   const [expandedDoms, setExpandedDoms] = useState<Record<string, boolean>>({});
   const [ingestOpen, setIngestOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
@@ -999,9 +1122,13 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
 
   // Filtered node IDs
   const filtIds = useMemo(() => {
-    if (!filterType) return new Set(nodes.map((n) => n.id));
-    return new Set(nodes.filter((n) => n.type === filterType).map((n) => n.id));
-  }, [filterType, nodes]);
+    if (!filterType && !filterDomain) return new Set(nodes.map((n) => n.id));
+    return new Set(nodes.filter((n) => {
+      if (filterType && n.type !== filterType) return false;
+      if (filterDomain && n.domain !== filterDomain) return false;
+      return true;
+    }).map((n) => n.id));
+  }, [filterType, filterDomain, nodes]);
 
   // Domains grouped
   const domains = useMemo(() => {
@@ -1240,19 +1367,34 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
                 style={{
                   padding: '9px 14px', cursor: 'pointer', display: 'flex',
                   alignItems: 'center', gap: 8, fontSize: 11, fontWeight: 700,
+                  background: filterDomain === dom ? `${A}20` : 'transparent',
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = FG;
-                  e.currentTarget.style.color = BG;
+                  e.currentTarget.style.background = filterDomain === dom ? `${A}30` : FG;
+                  e.currentTarget.style.color = filterDomain === dom ? A : BG;
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent';
-                  e.currentTarget.style.color = FG;
+                  e.currentTarget.style.background = filterDomain === dom ? `${A}20` : 'transparent';
+                  e.currentTarget.style.color = filterDomain === dom ? A : FG;
                 }}
               >
                 <span style={{ fontSize: 9 }}>{expandedDoms[dom] ? '[-]' : '[+]'}</span>
-                <span>{dom}</span>
-                <span style={{ marginLeft: 'auto', fontSize: 9, opacity: 0.5 }}>
+                <span style={{ color: filterDomain === dom ? A : 'inherit' }}>{dom}</span>
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setFilterDomain(filterDomain === dom ? null : dom);
+                  }}
+                  style={{
+                    marginLeft: 'auto', fontSize: 8, padding: '2px 6px',
+                    border: `1px solid ${filterDomain === dom ? A : BR}`,
+                    color: filterDomain === dom ? A : DM,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {filterDomain === dom ? 'ALL' : 'FILTER'}
+                </span>
+                <span style={{ fontSize: 9, opacity: 0.5 }}>
                   {items.length}
                 </span>
               </div>
@@ -1481,6 +1623,14 @@ ESC    Close / deselect`}
                 }
               }}
               onExport={exportSubgraph}
+              onUpdate={async () => {
+                await refreshData();
+                // Re-fetch detail
+                if (selId) {
+                  const d = await fetch(`${API_BASE}/v1/nodes/${selId}`).then(r => r.json());
+                  setDetail(d);
+                }
+              }}
             />
           </div>
         </div>
