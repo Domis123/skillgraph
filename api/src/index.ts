@@ -16,7 +16,7 @@ const app = new Hono();
 // ── Middleware ──
 app.use('*', cors({
   origin: '*',  // Lock down to your domain in production
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
   allowHeaders: ['Authorization', 'Content-Type'],
 }));
 app.use('*', logger());

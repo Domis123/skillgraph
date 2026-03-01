@@ -1458,7 +1458,7 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
             {hasPos && edges.map((e, i) => {
             const sp = pos[e.source], tp = pos[e.target];
             if (!sp || !tp) return null;
-            if (filterType && (!filtIds.has(e.source) || !filtIds.has(e.target))) return null;
+            if ((filterType || filterDomain) && (!filtIds.has(e.source) || !filtIds.has(e.target))) return null;
             const active = connIds.has(e.source) && connIds.has(e.target);
             const dim = (selId || hovId) ? !active : false;
             return (
@@ -1471,7 +1471,7 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
           {hasPos && nodes.map((n) => {
             const p = pos[n.id];
             if (!p) return null;
-            if (filterType && !filtIds.has(n.id)) return null;
+            if ((filterType || filterDomain) && !filtIds.has(n.id)) return null;
             const isSel = selId === n.id;
             const isHL = connIds.has(n.id);
             const dim = (selId || hovId) ? !isHL && !isSel : false;
