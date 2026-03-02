@@ -215,20 +215,24 @@ function useForce(
     ids.forEach(id => {
       const p = pr.current[id];
       if (p) {
-        minX = Math.min(minX, p.x);
-        maxX = Math.max(maxX, p.x);
-        minY = Math.min(minY, p.y);
-        maxY = Math.max(maxY, p.y);
+        minX = Math.min(minX, p.x - 120); // half node width
+        maxX = Math.max(maxX, p.x + 120);
+        minY = Math.min(minY, p.y - 50);  // half node height
+        maxY = Math.max(maxY, p.y + 50);
       }
     });
-    const graphW = maxX - minX + 400;
-    const graphH = maxY - minY + 200;
+    // Add generous padding so nodes at edges aren't cut off
+    const pad = 100;
+    minX -= pad; maxX += pad; minY -= pad; maxY += pad;
+    const graphW = maxX - minX;
+    const graphH = maxY - minY;
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
-    const fitZoom = Math.min(w / graphW, h / graphH, 1.2);
+    // Fit to viewport, max zoom 0.85 so there's always breathing room
+    const fitZoom = Math.min(w / graphW, h / graphH, 0.85);
     return {
       pan: { x: w / 2 - centerX * fitZoom, y: h / 2 - centerY * fitZoom },
-      zoom: Math.max(0.3, Math.min(fitZoom, 1.2)),
+      zoom: Math.max(0.2, fitZoom),
     };
   }, [w, h]);
 
@@ -1612,12 +1616,19 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
                 onMouseDown={(e) => {
                   if (e.button !== 0) return;
                   e.stopPropagation();
+                  const rect = graphRef.current?.getBoundingClientRect();
+                  if (!rect) return;
+                  // Calculate offset from cursor to node center so node doesn't jump
+                  const cursorX = (e.clientX - rect.left - pan.x) / zoom;
+                  const cursorY = (e.clientY - rect.top - pan.y) / zoom;
+                  const offsetX = cursorX - p.x;
+                  const offsetY = cursorY - p.y;
                   startDrag(n.id);
                   const onMove = (ev: MouseEvent) => {
-                    const rect = graphRef.current?.getBoundingClientRect();
-                    if (!rect) return;
-                    const x = (ev.clientX - rect.left - pan.x) / zoom;
-                    const y = (ev.clientY - rect.top - pan.y) / zoom;
+                    const r = graphRef.current?.getBoundingClientRect();
+                    if (!r) return;
+                    const x = (ev.clientX - r.left - pan.x) / zoom - offsetX;
+                    const y = (ev.clientY - r.top - pan.y) / zoom - offsetY;
                     moveDrag(n.id, x, y);
                   };
                   const onUp = () => {
