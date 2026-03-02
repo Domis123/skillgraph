@@ -170,10 +170,11 @@ function MEdge({
 
 // ── Node Component (variable size based on connections) ──
 function MNode({
-  node, isSel, dim, onClick, x, y,
+  node, isSel, dim, onClick, x, y, isSearchMatch,
 }: {
   node: NodeMeta; isSel: boolean; dim: boolean;
   onClick: (n: NodeMeta) => void; x: number; y: number;
+  isSearchMatch?: boolean;
 }) {
   const [hov, setHov] = useState(false);
   const inv = isSel || hov;
@@ -202,12 +203,12 @@ function MNode({
       style={{
         position: 'absolute', left: x - nodeW / 2, top: y - 30, width: nodeW,
         padding: isHub ? '12px 16px' : '10px 14px', cursor: 'pointer',
-        border: `${isHub ? 4 : 3}px solid ${isSel ? A : hov ? A : dim ? GR : BR}`,
-        borderLeftColor: isSel ? A : hov ? A : dim ? GR : ringColor,
+        border: `${isHub ? 4 : 3}px solid ${isSel ? A : hov ? A : isSearchMatch ? '#ffcc00' : dim ? GR : BR}`,
+        borderLeftColor: isSel ? A : hov ? A : isSearchMatch ? '#ffcc00' : dim ? GR : ringColor,
         borderLeftWidth: isSel || hov ? (isHub ? 4 : 3) : 5,
         background: inv ? FG : BG, color: inv ? BG : FG,
-        boxShadow: inv ? `5px 5px 0 ${A}` : isHub ? `5px 5px 0 rgba(255,102,0,${glowAlpha})` : `4px 4px 0 #000`,
-        opacity: dim ? 0.1 : 1, zIndex: isSel ? 50 : hov ? 40 : isHub ? 5 : 1,
+        boxShadow: inv ? `5px 5px 0 ${A}` : isSearchMatch ? `0 0 12px rgba(255,204,0,0.5), 5px 5px 0 rgba(255,204,0,0.2)` : isHub ? `5px 5px 0 rgba(255,102,0,${glowAlpha})` : `4px 4px 0 #000`,
+        opacity: dim && !isSearchMatch ? 0.1 : 1, zIndex: isSel ? 50 : hov ? 40 : isSearchMatch ? 30 : isHub ? 5 : 1,
         fontFamily: "'JetBrains Mono', monospace",
         transform: hov && !isSel ? 'translate(-2px,-2px)' : 'none',
       }}
@@ -1004,6 +1005,11 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+
+  // IDs of nodes matching current search (for graph highlighting)
+  const searchMatchIds = useMemo(() => {
+    return new Set(searchResults.map((r: any) => r.id));
+  }, [searchResults]);
   const [filterType, setFilterType] = useState<string | null>(null);
   const [filterDomain, setFilterDomain] = useState<string | null>(null);
   const [expandedDoms, setExpandedDoms] = useState<Record<string, boolean>>({});
@@ -1244,7 +1250,18 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
     setSelId(id);
     setSearchOpen(false);
     setSearchQuery('');
-  }, []);
+    // Pan graph to center on selected node
+    const nodePos = pos[id];
+    if (nodePos && graphRef.current) {
+      const rect = graphRef.current.getBoundingClientRect();
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2;
+      setPan({
+        x: centerX - nodePos.x * zoom,
+        y: centerY - nodePos.y * zoom,
+      });
+    }
+  }, [pos, zoom]);
 
   const handleNodeClick = useCallback((n: NodeMeta) => {
     setSelId(n.id);
@@ -1474,6 +1491,7 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
             if ((filterType || filterDomain) && !filtIds.has(n.id)) return null;
             const isSel = selId === n.id;
             const isHL = connIds.has(n.id);
+            const isMatch = searchMatchIds.has(n.id);
             const dim = (selId || hovId) ? !isHL && !isSel : false;
             return (
               <div
@@ -1481,7 +1499,32 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
                 onMouseEnter={() => !selId && setHovId(n.id)}
                 onMouseLeave={() => setHovId(null)}
               >
-                <MNode node={n} isSel={isSel} dim={dim} onClick={handleNodeClick} x={p.x} y={p.y} />
+                <MNode node={n} isSel={isSel} dim={dim} onClick={handleNodeClick} x={p.x} y={p.y} isSearchMatch={isMatch} />
+                {hovId === n.id && !selId && (
+                  <div style={{
+                    position: 'absolute',
+                    left: p.x + 100, top: p.y - 60,
+                    width: 260, padding: '10px 12px',
+                    background: '#111', border: `2px solid ${A}`,
+                    boxShadow: `4px 4px 0 rgba(255,102,0,0.3)`,
+                    fontSize: 10, lineHeight: 1.5, color: '#aaa',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    zIndex: 100, pointerEvents: 'none',
+                  }}>
+                    <div style={{ fontSize: 8, color: A, fontWeight: 700, marginBottom: 4, letterSpacing: '0.08em' }}>
+                      {n.domain}
+                    </div>
+                    <div style={{ color: FG, fontSize: 11, fontWeight: 700, marginBottom: 6 }}>
+                      {n.title.length > 40 ? n.title.slice(0, 40) + '…' : n.title}
+                    </div>
+                    <div style={{ color: '#888', fontSize: 9 }}>
+                      {(Array.isArray(n.tags) ? n.tags : []).slice(0, 4).join(' · ')}
+                    </div>
+                    <div style={{ marginTop: 6, fontSize: 9, color: DM }}>
+                      {n.connectionCount} connections · {n.confidence || 'medium'}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
