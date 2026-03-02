@@ -46,6 +46,26 @@ function useForce(
   const [pos, setPos] = useState<Record<string, { x: number; y: number }>>({});
   const pr = useRef<Record<string, { x: number; y: number }>>({});
   const vr = useRef<Record<string, { x: number; y: number }>>({});
+  const dragging = useRef<string | null>(null);
+  const settled = useRef(false);
+  const frameRef = useRef<number>(0);
+
+  const startDrag = useCallback((id: string) => {
+    dragging.current = id;
+    settled.current = false;
+  }, []);
+
+  const moveDrag = useCallback((id: string, x: number, y: number) => {
+    if (dragging.current === id && pr.current[id]) {
+      pr.current[id] = { x, y };
+      vr.current[id] = { x: 0, y: 0 };
+      setPos({ ...pr.current });
+    }
+  }, []);
+
+  const endDrag = useCallback(() => {
+    dragging.current = null;
+  }, []);
 
   useEffect(() => {
     if (nodes.length === 0 || w === 0 || h === 0) return;
@@ -53,95 +73,173 @@ function useForce(
     const p: Record<string, { x: number; y: number }> = {};
     const v: Record<string, { x: number; y: number }> = {};
 
-    // Assign each domain a cluster center spread across the canvas
     const ds = [...new Set(nodes.map((n) => n.domain))];
-    const clusterCenters: Record<string, { x: number; y: number }> = {};
-    const margin = 250;
-    const cx = w / 2, cy = h / 2;
-    const clusterRadius = Math.min(w, h) * 0.32;
+    const systems = [...new Set(ds.map(d => d.split('/')[0]))];
 
-    ds.forEach((d, i) => {
-      const angle = (i / ds.length) * Math.PI * 2 - Math.PI / 2;
-      clusterCenters[d] = {
-        x: cx + Math.cos(angle) * clusterRadius,
-        y: cy + Math.sin(angle) * clusterRadius,
+    const clusterCenters: Record<string, { x: number; y: number }> = {};
+    const cx = w / 2, cy = h / 2;
+    const systemRadius = Math.min(w, h) * 0.38;
+    const subRadius = 120;
+
+    const systemCenters: Record<string, { x: number; y: number }> = {};
+    systems.forEach((sys, i) => {
+      const angle = (i / systems.length) * Math.PI * 2 - Math.PI / 2;
+      systemCenters[sys] = {
+        x: cx + Math.cos(angle) * systemRadius,
+        y: cy + Math.sin(angle) * systemRadius,
       };
     });
 
-    // Initialize nodes near their cluster center
+    ds.forEach((d) => {
+      const sys = d.split('/')[0];
+      const siblingsInSystem = ds.filter(dd => dd.split('/')[0] === sys);
+      const idx = siblingsInSystem.indexOf(d);
+      const angle = (idx / Math.max(siblingsInSystem.length, 1)) * Math.PI * 2;
+      const sc = systemCenters[sys];
+      clusterCenters[d] = {
+        x: sc.x + Math.cos(angle) * subRadius,
+        y: sc.y + Math.sin(angle) * subRadius,
+      };
+    });
+
     nodes.forEach((n) => {
-      const cc = clusterCenters[n.domain];
-      const a = Math.random() * Math.PI * 2;
-      const r = 30 + Math.random() * 80;
-      p[n.id] = { x: cc.x + Math.cos(a) * r, y: cc.y + Math.sin(a) * r };
-      v[n.id] = { x: 0, y: 0 };
+      if (pr.current[n.id] && !isNaN(pr.current[n.id].x)) {
+        p[n.id] = { ...pr.current[n.id] };
+        v[n.id] = vr.current[n.id] || { x: 0, y: 0 };
+      } else {
+        const cc = clusterCenters[n.domain];
+        let hash = 0;
+        for (let i = 0; i < n.id.length; i++) hash = ((hash << 5) - hash + n.id.charCodeAt(i)) | 0;
+        const a = ((hash & 0xffff) / 0xffff) * Math.PI * 2;
+        const r = 40 + ((hash >>> 16) & 0xff) / 255 * 80;
+        p[n.id] = { x: cc.x + Math.cos(a) * r, y: cc.y + Math.sin(a) * r };
+        v[n.id] = { x: 0, y: 0 };
+      }
     });
     pr.current = p;
     vr.current = v;
+    settled.current = false;
 
-    let i = 0;
+    let iter = 0;
+    const maxIter = 800;
+
     const tick = () => {
-      if (i++ > 500) return;
+      if (settled.current && !dragging.current) return;
+      if (iter++ > maxIter && !dragging.current) { settled.current = true; return; }
+
       const pp = pr.current;
       const vv = vr.current;
+      let totalMovement = 0;
+
+      const minDist = Math.sqrt(200 * 200 + 70 * 70);
 
       nodes.forEach((n) => {
+        if (dragging.current === n.id) return;
         let fx = 0, fy = 0;
 
-        // 1. Node-node repulsion (strong, keeps nodes apart)
         nodes.forEach((m) => {
           if (n.id === m.id) return;
           const dx = pp[n.id].x - pp[m.id].x;
           const dy = pp[n.id].y - pp[m.id].y;
           const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
           const sameDomain = n.domain === m.domain;
-          // Stronger repulsion between domains, moderate within
-          const repForce = sameDomain ? 40000 : 80000;
+          const sameSystem = n.domain.split('/')[0] === m.domain.split('/')[0];
+
+          let repForce;
+          if (dist < minDist) {
+            repForce = sameDomain ? 60000 : 120000;
+          } else {
+            repForce = sameDomain ? 30000 : sameSystem ? 50000 : 90000;
+          }
           fx += (dx / dist) * (repForce / (dist * dist));
           fy += (dy / dist) * (repForce / (dist * dist));
         });
 
-        // 2. Edge attraction (gentle, pulls connected nodes closer)
         edges.forEach((e) => {
           const o = e.source === n.id ? e.target : e.target === n.id ? e.source : null;
           if (o && pp[o]) {
             const dx = pp[o].x - pp[n.id].x;
             const dy = pp[o].y - pp[n.id].y;
-            // Weaker attraction for cross-domain edges
+            const dist = Math.sqrt(dx * dx + dy * dy);
             const sameDom = nodes.find(nd => nd.id === o)?.domain === n.domain;
-            const strength = sameDom ? 0.008 : 0.003;
-            fx += dx * strength;
-            fy += dy * strength;
+            const idealDist = sameDom ? 220 : 350;
+            if (dist > idealDist) {
+              const strength = sameDom ? 0.005 : 0.002;
+              fx += dx * strength;
+              fy += dy * strength;
+            }
           }
         });
 
-        // 3. Domain cluster gravity (pulls nodes toward their cluster center)
         const cc = clusterCenters[n.domain];
-        fx += (cc.x - pp[n.id].x) * 0.006;
-        fy += (cc.y - pp[n.id].y) * 0.006;
+        if (cc) {
+          fx += (cc.x - pp[n.id].x) * 0.004;
+          fy += (cc.y - pp[n.id].y) * 0.004;
+        }
 
-        // 4. Very weak center gravity (prevents drift to infinity)
-        fx += (cx - pp[n.id].x) * 0.0005;
-        fy += (cy - pp[n.id].y) * 0.0005;
+        fx += (cx - pp[n.id].x) * 0.0003;
+        fy += (cy - pp[n.id].y) * 0.0003;
 
-        // Damping
-        vv[n.id].x = (vv[n.id].x + fx) * 0.75;
-        vv[n.id].y = (vv[n.id].y + fy) * 0.75;
+        const damping = iter < 200 ? 0.7 : iter < 400 ? 0.6 : 0.5;
+        vv[n.id].x = (vv[n.id].x + fx) * damping;
+        vv[n.id].y = (vv[n.id].y + fy) * damping;
+
+        const maxV = 15;
+        vv[n.id].x = Math.max(-maxV, Math.min(maxV, vv[n.id].x));
+        vv[n.id].y = Math.max(-maxV, Math.min(maxV, vv[n.id].y));
       });
 
       nodes.forEach((n) => {
+        if (dragging.current === n.id) return;
         pp[n.id].x += vv[n.id].x;
         pp[n.id].y += vv[n.id].y;
+        totalMovement += Math.abs(vv[n.id].x) + Math.abs(vv[n.id].y);
       });
 
       pr.current = { ...pp };
-      if (i % 4 === 0 || i >= 500) setPos({ ...pp });
-      requestAnimationFrame(tick);
+      if (totalMovement < 0.5 && iter > 100 && !dragging.current) {
+        settled.current = true;
+      }
+      if (iter % 3 === 0 || settled.current) setPos({ ...pp });
+      frameRef.current = requestAnimationFrame(tick);
     };
-    requestAnimationFrame(tick);
+    frameRef.current = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(frameRef.current);
   }, [nodes, edges, w, h]);
 
-  return pos;
+  const autoCenter = useCallback(() => {
+    const ids = Object.keys(pr.current);
+    if (ids.length === 0) return null;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    ids.forEach(id => {
+      const p = pr.current[id];
+      if (p) {
+        minX = Math.min(minX, p.x);
+        maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y);
+        maxY = Math.max(maxY, p.y);
+      }
+    });
+    const graphW = maxX - minX + 400;
+    const graphH = maxY - minY + 200;
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    const fitZoom = Math.min(w / graphW, h / graphH, 1.2);
+    return {
+      pan: { x: w / 2 - centerX * fitZoom, y: h / 2 - centerY * fitZoom },
+      zoom: Math.max(0.3, Math.min(fitZoom, 1.2)),
+    };
+  }, [w, h]);
+
+  const reLayout = useCallback(() => {
+    pr.current = {};
+    vr.current = {};
+    settled.current = false;
+    setPos({});
+  }, []);
+
+  return { pos, startDrag, moveDrag, endDrag, autoCenter, reLayout };
 }
 
 // ── Edge Component ──
@@ -1111,8 +1209,21 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
     isPanning.current = false;
   }, []);
 
-  const pos = useForce(nodes, edges, graphSize.w / zoom, graphSize.h / zoom);
+  const { pos, startDrag, moveDrag, endDrag, autoCenter, reLayout } = useForce(nodes, edges, graphSize.w, graphSize.h);
   const hasPos = Object.keys(pos).length > 0;
+
+  // Auto-center on first layout
+  const hasCentered = useRef(false);
+  useEffect(() => {
+    if (hasPos && !hasCentered.current) {
+      const fit = autoCenter();
+      if (fit) {
+        setPan(fit.pan);
+        setZoom(fit.zoom);
+        hasCentered.current = true;
+      }
+    }
+  }, [hasPos, autoCenter]);
 
   // Connected node IDs for highlighting
   const connIds = useMemo(() => {
@@ -1498,6 +1609,25 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
                 key={n.id}
                 onMouseEnter={() => !selId && setHovId(n.id)}
                 onMouseLeave={() => setHovId(null)}
+                onMouseDown={(e) => {
+                  if (e.button !== 0) return;
+                  e.stopPropagation();
+                  startDrag(n.id);
+                  const onMove = (ev: MouseEvent) => {
+                    const rect = graphRef.current?.getBoundingClientRect();
+                    if (!rect) return;
+                    const x = (ev.clientX - rect.left - pan.x) / zoom;
+                    const y = (ev.clientY - rect.top - pan.y) / zoom;
+                    moveDrag(n.id, x, y);
+                  };
+                  const onUp = () => {
+                    endDrag();
+                    window.removeEventListener('mousemove', onMove);
+                    window.removeEventListener('mouseup', onUp);
+                  };
+                  window.addEventListener('mousemove', onMove);
+                  window.addEventListener('mouseup', onUp);
+                }}
               >
                 <MNode node={n} isSel={isSel} dim={dim} onClick={handleNodeClick} x={p.x} y={p.y} isSearchMatch={isMatch} />
                 {hovId === n.id && !selId && (
@@ -1552,6 +1682,18 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
                 alignItems: 'center', justifyContent: 'center',
               }}
             >−</button>
+            <button
+              onClick={() => {
+                const fit = autoCenter();
+                if (fit) { setPan(fit.pan); setZoom(fit.zoom); }
+              }}
+              style={{
+                width: 32, height: 32, border: `2px solid ${A}`, background: BG,
+                color: A, fontSize: 8, cursor: 'pointer',
+                fontFamily: "'JetBrains Mono', monospace", display: 'flex',
+                alignItems: 'center', justifyContent: 'center', fontWeight: 700,
+              }}
+            >FIT</button>
             <button
               onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
               style={{
