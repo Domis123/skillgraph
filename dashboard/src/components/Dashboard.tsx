@@ -215,23 +215,21 @@ function useForce(
     ids.forEach(id => {
       const p = pr.current[id];
       if (p) {
-        minX = Math.min(minX, p.x - 120); // half node width
+        minX = Math.min(minX, p.x - 120);
         maxX = Math.max(maxX, p.x + 120);
-        minY = Math.min(minY, p.y - 50);  // half node height
+        minY = Math.min(minY, p.y - 50);
         maxY = Math.max(maxY, p.y + 50);
       }
     });
-    // Add generous padding so nodes at edges aren't cut off
     const pad = 100;
     minX -= pad; maxX += pad; minY -= pad; maxY += pad;
     const graphW = maxX - minX;
     const graphH = maxY - minY;
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-    // Fit to viewport, max zoom 0.85 so there's always breathing room
+    const nodeCenterX = (minX + maxX) / 2;
+    const nodeCenterY = (minY + maxY) / 2;
     const fitZoom = Math.min(w / graphW, h / graphH, 0.85);
     return {
-      pan: { x: w / 2 - centerX * fitZoom, y: h / 2 - centerY * fitZoom },
+      pan: { x: (w / 2) - nodeCenterX * fitZoom, y: (h / 2) - nodeCenterY * fitZoom },
       zoom: Math.max(0.2, fitZoom),
     };
   }, [w, h]);
@@ -1219,15 +1217,19 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
   // Auto-center on first layout
   const hasCentered = useRef(false);
   useEffect(() => {
-    if (hasPos && !hasCentered.current) {
-      const fit = autoCenter();
-      if (fit) {
-        setPan(fit.pan);
-        setZoom(fit.zoom);
-        hasCentered.current = true;
-      }
+    if (hasPos && !hasCentered.current && Object.keys(pos).length >= nodes.length) {
+      // Delay to let the layout settle a bit
+      const timer = setTimeout(() => {
+        const fit = autoCenter();
+        if (fit) {
+          setPan(fit.pan);
+          setZoom(fit.zoom);
+          hasCentered.current = true;
+        }
+      }, 600);
+      return () => clearTimeout(timer);
     }
-  }, [hasPos, autoCenter]);
+  }, [hasPos, autoCenter, pos, nodes.length]);
 
   // Connected node IDs for highlighting
   const connIds = useMemo(() => {
