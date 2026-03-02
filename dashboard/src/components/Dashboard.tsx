@@ -33,6 +33,20 @@ const EM: Record<string, string> = {
   supersedes: 'SUPERSEDES',
 };
 
+// Domain system colors — top-level systems get distinct hues
+const DOMAIN_COLORS: Record<string, string> = {
+  'content-system': '#ff8844',
+  'n8n': '#44aaff',
+  'ai-engineering': '#aa66ff',
+  'social-automation': '#44dd88',
+  'concepts': '#ffcc33',
+  'meta': '#888888',
+};
+function getDomainColor(domain: string): string {
+  const sys = domain.split('/')[0];
+  return DOMAIN_COLORS[sys] || '#666';
+}
+
 // ── Cluster Force Layout (Bubblemaps-style) ──
 // Each domain gets its own gravity well. Nodes repel strongly.
 // Connected nodes attract gently. Result: separated domain islands.
@@ -245,26 +259,49 @@ function useForce(
 }
 
 // ── Edge Component ──
+// ── Edge Component ──
 function MEdge({
   x1, y1, x2, y2, active, dim, edgeType,
 }: {
   x1: number; y1: number; x2: number; y2: number;
   active: boolean; dim: boolean; edgeType: string;
 }) {
+  const [hov, setHov] = useState(false);
   const dx = x2 - x1, dy = y2 - y1;
   const len = Math.sqrt(dx * dx + dy * dy);
   const ang = Math.atan2(dy, dx) * (180 / Math.PI);
   const dashed = edgeType === 'related_to';
   const col = active ? A : BR;
+  const midX = (x1 + x2) / 2, midY = (y1 + y2) / 2;
 
   return (
-    <div style={{
-      position: 'absolute', left: x1, top: y1, width: len, height: 2,
-      background: `repeating-linear-gradient(90deg,${col} 0px,${col} ${dashed ? 4 : 8}px,transparent ${dashed ? 4 : 8}px,transparent ${dashed ? 8 : 12}px)`,
-      transform: `rotate(${ang}deg)`, transformOrigin: '0 0',
-      opacity: dim ? 0.06 : 1, zIndex: 0,
-      animation: active ? 'march 0.8s linear infinite' : 'none',
-    }} />
+    <>
+      <div
+        onMouseEnter={() => setHov(true)}
+        onMouseLeave={() => setHov(false)}
+        style={{
+          position: 'absolute', left: x1, top: y1 - 4, width: len, height: 10,
+          transform: `rotate(${ang}deg)`, transformOrigin: '0 5px',
+          opacity: dim ? 0.06 : 1, zIndex: active ? 2 : 0, cursor: 'default',
+        }}
+      >
+        <div style={{
+          position: 'absolute', top: 4, left: 0, right: 0, height: 2,
+          background: `repeating-linear-gradient(90deg,${col} 0px,${col} ${dashed ? 4 : 8}px,transparent ${dashed ? 4 : 8}px,transparent ${dashed ? 8 : 12}px)`,
+          animation: active ? 'march 0.8s linear infinite' : 'none',
+        }} />
+      </div>
+      {hov && active && (
+        <div style={{
+          position: 'absolute', left: midX - 30, top: midY - 12,
+          padding: '2px 6px', background: '#111', border: `1px solid ${A}`,
+          fontSize: 8, color: A, fontWeight: 700, letterSpacing: '0.05em',
+          zIndex: 60, pointerEvents: 'none', whiteSpace: 'nowrap',
+        }}>
+          {EM[edgeType] || edgeType.toUpperCase()}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -291,9 +328,11 @@ function MNode({
   const connScore = Math.min(conns / 3, 3); // cap at 3
   const strength = (confScore + connScore) / 6; // 0-1
 
+  const domColor = getDomainColor(node.domain);
+
   // Strength ring color and glow
   const glowAlpha = (strength * 0.5).toFixed(2);
-  const ringColor = strength > 0.7 ? A : strength > 0.4 ? '#ffaa33' : '#555';
+  const ringColor = strength > 0.7 ? domColor : strength > 0.4 ? '#ffaa33' : '#555';
 
   return (
     <div
@@ -304,10 +343,10 @@ function MNode({
         position: 'absolute', left: x - nodeW / 2, top: y - 30, width: nodeW,
         padding: isHub ? '12px 16px' : '10px 14px', cursor: 'pointer',
         border: `${isHub ? 4 : 3}px solid ${isSel ? A : hov ? A : isSearchMatch ? '#ffcc00' : dim ? GR : BR}`,
-        borderLeftColor: isSel ? A : hov ? A : isSearchMatch ? '#ffcc00' : dim ? GR : ringColor,
+        borderLeftColor: isSel ? A : hov ? A : isSearchMatch ? '#ffcc00' : dim ? GR : domColor,
         borderLeftWidth: isSel || hov ? (isHub ? 4 : 3) : 5,
         background: inv ? FG : BG, color: inv ? BG : FG,
-        boxShadow: inv ? `5px 5px 0 ${A}` : isSearchMatch ? `0 0 12px rgba(255,204,0,0.5), 5px 5px 0 rgba(255,204,0,0.2)` : isHub ? `5px 5px 0 rgba(255,102,0,${glowAlpha})` : `4px 4px 0 #000`,
+        boxShadow: inv ? `5px 5px 0 ${A}` : isSearchMatch ? `0 0 12px rgba(255,204,0,0.5), 5px 5px 0 rgba(255,204,0,0.2)` : isHub ? `5px 5px 0 ${domColor}${Math.round(parseFloat(glowAlpha) * 255).toString(16).padStart(2,'0')}` : `4px 4px 0 #000`,
         opacity: dim && !isSearchMatch ? 0.1 : 1, zIndex: isSel ? 50 : hov ? 40 : isSearchMatch ? 30 : isHub ? 5 : 1,
         fontFamily: "'JetBrains Mono', monospace",
         transform: hov && !isSel ? 'translate(-2px,-2px)' : 'none',
@@ -335,7 +374,7 @@ function MNode({
         fontSize: 9, color: inv ? BG : DM, display: 'flex', gap: 10,
       }}>
         <span>{conns} links</span>
-        <span>{node.domain}</span>
+        <span style={{ color: inv ? BG : domColor }}>{node.domain.split('/').pop()}</span>
       </div>
     </div>
   );
@@ -1083,6 +1122,13 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
   const [liveStats, setLiveStats] = useState(initialStats);
   const { nodes, edges } = liveGraph;
 
+  // Toast notifications
+  const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' } | null>(null);
+  const showToast = useCallback((msg: string, type: 'ok' | 'err' = 'ok') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  }, []);
+
   // Refresh function — fetches fresh data from API bypassing cache
   const refreshData = useCallback(async () => {
     try {
@@ -1092,10 +1138,11 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
       ]);
       setLiveGraph(g);
       setLiveStats(s);
+      showToast('Graph refreshed', 'ok');
     } catch (e) {
-      console.error('Refresh failed:', e);
+      showToast('Failed to refresh graph', 'err');
     }
-  }, []);
+  }, [showToast]);
 
   const [selId, setSelId] = useState<string | null>(null);
   const [hovId, setHovId] = useState<string | null>(null);
@@ -1115,6 +1162,7 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
   const [expandedDoms, setExpandedDoms] = useState<Record<string, boolean>>({});
   const [ingestOpen, setIngestOpen] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
+  const [quickPaste, setQuickPaste] = useState<string | null>(null);
   const [changelogData, setChangelogData] = useState<any[]>([]);
   const [showHelp, setShowHelp] = useState(false);
   const [leftOpen, setLeftOpen] = useState(true);
@@ -1270,7 +1318,7 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
     fetch(`${API_BASE}/v1/nodes/${selId}`)
       .then((r) => r.json())
       .then((d) => { setDetail(d); setDetailLoading(false); })
-      .catch(() => setDetailLoading(false));
+      .catch(() => { setDetailLoading(false); showToast('Failed to load node details', 'err'); });
   }, [selId]);
 
   // Search debounce
@@ -1469,6 +1517,29 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
           >
             LOG
           </button>
+          <button
+            onClick={async () => {
+              try {
+                const text = await navigator.clipboard.readText();
+                if (text.trim()) {
+                  setQuickPaste(text.trim());
+                  showToast('Clipboard captured — fill in details', 'ok');
+                } else {
+                  showToast('Clipboard is empty', 'err');
+                }
+              } catch {
+                showToast('Clipboard access denied', 'err');
+              }
+            }}
+            style={{
+              padding: '4px 12px', border: `3px solid ${BR}`,
+              background: BG, color: DM,
+              fontSize: 9, fontWeight: 700, cursor: 'pointer',
+              fontFamily: "'JetBrains Mono', monospace",
+            }}
+          >
+            PASTE
+          </button>
         </div>
       </div>
 
@@ -1588,6 +1659,44 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: '50% 50%',
           }}>
+            {/* Domain cluster labels */}
+            {hasPos && (() => {
+              const domCenters: Record<string, { x: number; y: number; count: number }> = {};
+              nodes.forEach(n => {
+                const p = pos[n.id];
+                if (!p) return;
+                const sys = n.domain.split('/')[0];
+                if (!domCenters[sys]) domCenters[sys] = { x: 0, y: 0, count: 0 };
+                domCenters[sys].x += p.x;
+                domCenters[sys].y += p.y;
+                domCenters[sys].count++;
+              });
+              return Object.entries(domCenters).map(([sys, c]) => {
+                const cx = c.x / c.count;
+                const cy = c.y / c.count;
+                // Find the topmost node in this system to position label above
+                let minY = Infinity;
+                nodes.forEach(n => {
+                  if (n.domain.split('/')[0] === sys && pos[n.id]) {
+                    minY = Math.min(minY, pos[n.id].y);
+                  }
+                });
+                const col = DOMAIN_COLORS[sys] || '#666';
+                return (
+                  <div key={sys} style={{
+                    position: 'absolute', left: cx, top: minY - 55,
+                    transform: 'translateX(-50%)',
+                    fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
+                    color: col, opacity: 0.5,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    textTransform: 'uppercase', whiteSpace: 'nowrap',
+                    pointerEvents: 'none',
+                  }}>
+                    {sys}
+                  </div>
+                );
+              });
+            })()}
             {/* Edges */}
             {hasPos && edges.map((e, i) => {
             const sp = pos[e.source], tp = pos[e.target];
@@ -1906,6 +2015,61 @@ ESC    Close / deselect`}
         />
       )}
 
+      {/* ── QUICK PASTE MODAL ── */}
+      {quickPaste && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)',
+            zIndex: 500, display: 'flex', alignItems: 'flex-start',
+            justifyContent: 'center', paddingTop: 60,
+          }}
+          onClick={() => setQuickPaste(null)}
+        >
+          <div onClick={e => e.stopPropagation()} style={{
+            width: 580, border: `3px solid ${BR}`, background: BG,
+            boxShadow: `6px 6px 0 ${A}`, maxHeight: '80vh', overflowY: 'auto',
+          }}>
+            <div style={{ padding: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+                <span style={{ fontWeight: 800, fontSize: 13, color: A }}>QUICK_ADD</span>
+                <span onClick={() => setQuickPaste(null)} style={{ cursor: 'pointer', color: DM }}>×</span>
+              </div>
+              <div style={{ fontSize: 10, color: DM, marginBottom: 12 }}>Clipboard content captured. Review and add as a new node:</div>
+              <pre style={{
+                background: '#0a0a0a', border: `1px solid ${BR}`, padding: 12,
+                fontSize: 10, color: '#aaa', maxHeight: 150, overflowY: 'auto',
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word', marginBottom: 16,
+              }}>{quickPaste.slice(0, 500)}{quickPaste.length > 500 ? '\n...' : ''}</pre>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => {
+                  setQuickPaste(null);
+                  // Open ingest modal — it will pick up the content
+                  setIngestOpen(true);
+                  // Slight delay to let modal mount, then we'd need to pass content
+                  // For now, copy to clipboard with markdown wrapper
+                  const wrapped = `## Context\n\n${quickPaste}\n\n## Key Takeaway\n\n(Fill in)`;
+                  navigator.clipboard.writeText(wrapped).catch(() => {});
+                  showToast('Content formatted — paste into Content field', 'ok');
+                }} style={{
+                  flex: 1, padding: '10px 0', border: `3px solid ${A}`,
+                  background: `${A}20`, color: A, fontSize: 10, fontWeight: 700,
+                  cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace",
+                }}>
+                  → NEW NODE
+                </button>
+                <button onClick={() => setQuickPaste(null)} style={{
+                  padding: '10px 16px', border: `3px solid ${BR}`,
+                  background: 'transparent', color: DM, fontSize: 10, fontWeight: 700,
+                  cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace",
+                }}>
+                  DISCARD
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── CHANGELOG PANEL ── */}
       {changelogOpen && (
         <ChangelogPanel
@@ -1913,6 +2077,21 @@ ESC    Close / deselect`}
           onSelect={(id) => { selectNode(id); setChangelogOpen(false); }}
           onClose={() => setChangelogOpen(false)}
         />
+      )}
+
+      {/* ── TOAST NOTIFICATIONS ── */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          padding: '10px 24px', background: toast.type === 'ok' ? '#0a2a0a' : '#2a0a0a',
+          border: `2px solid ${toast.type === 'ok' ? '#33ff66' : '#ff3333'}`,
+          color: toast.type === 'ok' ? '#33ff66' : '#ff3333',
+          fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+          zIndex: 999, letterSpacing: '0.05em',
+          boxShadow: `4px 4px 0 ${toast.type === 'ok' ? 'rgba(51,255,102,0.2)' : 'rgba(255,51,51,0.2)'}`,
+        }}>
+          {toast.type === 'ok' ? '✓' : '✗'} {toast.msg}
+        </div>
       )}
     </div>
   );
