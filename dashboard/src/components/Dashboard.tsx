@@ -1540,6 +1540,24 @@ export function Dashboard({ graphData, stats: initialStats }: DashboardProps) {
           >
             PASTE
           </button>
+          <button
+            onClick={() => {
+              const url = `${API_BASE}/v1/graph/full`;
+              navigator.clipboard.writeText(url).then(() => {
+                showToast('Agent URL copied to clipboard', 'ok');
+              }).catch(() => {
+                showToast(url, 'ok');
+              });
+            }}
+            style={{
+              padding: '4px 12px', border: `3px solid #aa66ff`,
+              background: 'rgba(170,102,255,0.1)', color: '#aa66ff',
+              fontSize: 9, fontWeight: 700, cursor: 'pointer',
+              fontFamily: "'JetBrains Mono', monospace",
+            }}
+          >
+            AGENT
+          </button>
         </div>
       </div>
 
